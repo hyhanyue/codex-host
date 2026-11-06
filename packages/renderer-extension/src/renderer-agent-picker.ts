@@ -83,6 +83,8 @@ export interface RendererAgentPickerControl {
   root: HTMLElement;
   trigger: HTMLButtonElement;
   iconSlot: HTMLElement;
+  handoffLabel: HTMLElement;
+  openHandoff: (() => boolean) | undefined;
   spinner: HTMLElement;
   ownershipError: HTMLElement;
   menu: HTMLElement;
@@ -141,12 +143,14 @@ export function rendererAgentPickerView(
   agents: readonly RendererAgent[],
   availability: AgentAvailability = {},
   plugin?: HarnessPluginDescriptor,
+  handoffEnabled = false,
 ): RendererAgentPickerView {
   const optionDisabled = Object.fromEntries(
     agents.map((agent) => [
       agent,
       switching ||
-        state.phase === "locked" ||
+        (state.phase === "locked" &&
+          (!handoffEnabled || agent === "codex" || agent === state.agent)) ||
         (agent !== "codex" && (adapterState !== "ready" || availability[agent] !== "ready")),
     ]),
   ) as Partial<Record<RendererAgent, boolean>>;
@@ -163,7 +167,10 @@ export function rendererAgentPickerView(
   return {
     label: rendererAgentLabel(state.agent, plugin),
     triggerDisabled:
-      switching || state.phase === "locked" || (agents.length < 2 && state.agent === "codex"),
+      switching ||
+      (state.phase === "locked" &&
+        (!handoffEnabled || agents.every((agent) => optionDisabled[agent]))) ||
+      (agents.length < 2 && state.agent === "codex"),
     nativeModelHidden: switching || state.agent !== "codex",
     optionDisabled,
     downloadVisible,
@@ -260,7 +267,12 @@ export function mountRendererAgentPicker(
   ownershipError.setAttribute("aria-hidden", "true");
   ownershipError.style.display = "none";
   ownershipError.style.font = "bold 16px/1 system-ui, sans-serif";
-  trigger.append(iconSlot, spinner, ownershipError);
+  const handoffLabel = document.createElement("span");
+  handoffLabel.hidden = true;
+  handoffLabel.setAttribute("aria-hidden", "true");
+  handoffLabel.style.whiteSpace = "nowrap";
+  handoffLabel.style.fontSize = "12px";
+  trigger.append(iconSlot, handoffLabel, spinner, ownershipError);
 
   const menu = document.createElement("div");
   menu.id = `${composerId}-agent-menu`;
@@ -599,13 +611,14 @@ export function mountRendererAgentPicker(
   root.append(trigger, menu);
 
   const onTriggerClick = (): void => {
+    if (control.openHandoff?.()) return;
     if (popoverOpen(menu)) close();
     else open();
   };
   const onTriggerKeyDown = (event: KeyboardEvent): void => {
     if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
     event.preventDefault();
-    open(event.key === "ArrowUp" ? "last" : "first");
+    if (!control.openHandoff?.()) open(event.key === "ArrowUp" ? "last" : "first");
   };
   const onMenuKeyDown = (event: KeyboardEvent): void => {
     const buttons = [
@@ -651,6 +664,8 @@ export function mountRendererAgentPicker(
     root,
     trigger,
     iconSlot,
+    handoffLabel,
+    openHandoff: undefined,
     spinner,
     ownershipError,
     menu,
@@ -693,6 +708,7 @@ export function renderRendererAgentPicker(
   availability: AgentAvailability = {},
   currentCodexAccount: CodexAccountSummary | null = null,
   ownershipError = false,
+  handoffEnabled = false,
 ): RendererAgentPickerView {
   const view = rendererAgentPickerView(
     state,
@@ -701,6 +717,7 @@ export function renderRendererAgentPicker(
     control.agents,
     availability,
     control.plugins.find(({ id }) => id === state.agent),
+    handoffEnabled,
   );
   control.updateAvailability(availability);
   if (control.iconSlot.dataset.agent !== state.agent) {
@@ -721,16 +738,34 @@ export function renderRendererAgentPicker(
     ownershipError
       ? pickerGroupMessages().ownershipErrorLabel
       : state.phase === "locked"
-        ? `Agent: ${view.label}`
+        ? handoffEnabled
+          ? `Switch Agent, current ${view.label}`
+          : `Agent: ${view.label}`
         : `Select Agent, current ${view.label}`,
   );
   control.trigger.title = ownershipError
     ? pickerGroupMessages().ownershipErrorLabel
     : rendererAgentPickerTooltip(
-        state,
+        handoffEnabled ? { ...state, phase: "draft" } : state,
         currentCodexAccount ?? undefined,
         control.plugins.find(({ id }) => id === state.agent),
       );
+  const showHandoff = state.phase === "locked" && handoffEnabled && !control.trigger.disabled;
+  if (control.handoffLabel.hidden === showHandoff) control.handoffLabel.hidden = !showHandoff;
+  const handoffLabel = `${view.label} ⌄`;
+  if (control.handoffLabel.textContent !== handoffLabel)
+    control.handoffLabel.textContent = handoffLabel;
+  control.root.style.width = showHandoff ? "auto" : "30px";
+  control.trigger.style.width = showHandoff ? "auto" : "30px";
+  control.trigger.style.paddingInline = showHandoff ? "6px" : "0";
+  control.trigger.style.gap = showHandoff ? "4px" : "0";
+  if (showHandoff) {
+    control.trigger.removeAttribute("aria-haspopup");
+    control.trigger.removeAttribute("aria-controls");
+  } else {
+    control.trigger.setAttribute("aria-haspopup", "menu");
+    control.trigger.setAttribute("aria-controls", control.menu.id);
+  }
   control.trigger.style.cursor = control.trigger.disabled ? "not-allowed" : "pointer";
   control.trigger.style.opacity = control.trigger.disabled && !switching ? "0.72" : "1";
   control.iconSlot.style.display = switching || ownershipError ? "none" : "inline-flex";

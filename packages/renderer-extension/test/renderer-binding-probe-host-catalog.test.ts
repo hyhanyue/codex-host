@@ -91,6 +91,18 @@ vi.mock("../src/renderer-composer-dom.js", async (importOriginal) => {
   };
 });
 
+// These fixtures exercise Host catalog routing with synthetic elements. The
+// Composer routing panel's DOM and behavior are covered in Chromium.
+vi.mock("../src/renderer-composer-routing.js", () => ({
+  mountComposerRouting: () => ({
+    openHandoff: () => false,
+    configureDelegation: () => false,
+    sync: vi.fn(),
+    submit: () => false,
+    dispose: vi.fn(),
+  }),
+}));
+
 vi.mock("../src/versioned-renderer-adapter.js", async (importOriginal) => {
   const original = await importOriginal<typeof VersionedRendererAdapter>();
   return {

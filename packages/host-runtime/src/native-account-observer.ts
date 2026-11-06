@@ -24,7 +24,7 @@ export class NativeAccountObserver {
 
   constructor(
     private readonly input: {
-      control: Pick<CodexAccountControl, "refresh">;
+      control: Pick<CodexAccountControl, "refresh" | "invalidate" | "subscribe">;
       scope: AccountScope;
       notify(method: string, params: JsonObject): Promise<void>;
       diagnose(): void;
@@ -38,10 +38,10 @@ export class NativeAccountObserver {
     this.#initialized = true;
     this.#lastGeneration = nativeGeneration ?? -1;
     this.#scheduleAccountUpdate();
-    if (nativeGeneration !== undefined) this.observe({ method: "account/updated" });
+    if (nativeGeneration !== undefined) this.#collect();
   }
 
-  /** Called after forwarding the native frame. Identity read failure cannot alter its outcome. */
+  /** Retire the old identity before forwarding the native frame. */
   observe(value: JsonValue): void {
     if (
       !object(value) ||
@@ -50,6 +50,12 @@ export class NativeAccountObserver {
       !this.#ready()
     )
       return;
+    this.input.control.invalidate?.();
+    this.#collect();
+  }
+
+  #collect(): void {
+    if (!this.input.control.refresh || !this.#ready()) return;
     this.#collectRequested = true;
     if (this.#collecting) return;
     this.#collecting = (async () => {
@@ -57,7 +63,12 @@ export class NativeAccountObserver {
         this.#collectRequested = false;
         const generation = this.input.scope.owner.generation;
         const snapshot = await this.input.control.refresh?.();
-        if (snapshot && this.#ready() && generation === this.input.scope.owner.generation)
+        if (
+          snapshot &&
+          !this.input.control.subscribe &&
+          this.#ready() &&
+          generation === this.input.scope.owner.generation
+        )
           await this.input.notify("codexhost/account/changed", jsonObjectSchema.parse(snapshot));
       }
     })()

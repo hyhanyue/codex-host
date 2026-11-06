@@ -6,6 +6,7 @@ import type { HostSubagentState, HostThreadSnapshot } from "@codexhost/harness-a
 import {
   MappingStore,
   type CommitReadyThreadInput,
+  type CommitThreadHandoffInput,
   type CreateDelegationInput,
   type CreateProvisionalThreadInput,
   type DelegationStatus,
@@ -51,6 +52,7 @@ export interface ExternalThreadStore {
   ): Promise<StoredDelegationRecordV1>;
   removeDelegation(delegationId: HostThreadId): Promise<void>;
   createProvisional(input: CreateProvisionalThreadInput): Promise<StoredThreadRecordV1>;
+  commitThreadHandoff?(input: CommitThreadHandoffInput): Promise<StoredThreadRecordV1>;
   commitReady(input: CommitReadyThreadInput): Promise<StoredThreadRecordV1>;
   rebindSubagentSession(input: RebindSubagentSessionInput): Promise<StoredThreadRecordV1>;
   replaceReadySession(input: ReplaceReadySessionInput): Promise<StoredThreadRecordV1>;
@@ -133,6 +135,12 @@ export class ExternalThreadRepository {
   async find(threadId: string): Promise<StoredThreadRecordV1 | null> {
     const parsed = hostThreadIdSchema.safeParse(threadId);
     return parsed.success ? this.store.getThread(parsed.data) : null;
+  }
+
+  commitThreadHandoff(input: CommitThreadHandoffInput): Promise<StoredThreadRecordV1> {
+    if (!this.store.commitThreadHandoff)
+      throw new Error("Thread handoff persistence is unavailable");
+    return this.store.commitThreadHandoff(input);
   }
 
   list(): Promise<StoredThreadRecordV1[]> {
@@ -548,7 +556,7 @@ export function externalThreadValue(input: {
   const { record } = input;
   const createdAt = Math.floor(Date.parse(record.createdAt) / 1_000);
   const updatedAt = Math.floor(Date.parse(record.updatedAt) / 1_000);
-  const preview = input.turns
+  const preview = (record.handoff?.previousTurns ?? input.turns)
     .flatMap((turn) => (Array.isArray(turn.items) ? turn.items : []))
     .find(
       (item) =>
@@ -618,7 +626,7 @@ export function externalThreadValue(input: {
     ephemeral: record.ephemeral,
     canAcceptDirectInput: record.subagent ? false : input.loaded === false ? null : true,
     historyMode: record.historyMode,
-    isPinned: false,
+    isPinned: record.handoff?.pinned ?? false,
     projectId: record.projectId ?? null,
     daybreakEnabled: record.daybreakEnabled ?? null,
     ...threadSectionFields(input.placement),

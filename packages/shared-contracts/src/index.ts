@@ -47,6 +47,7 @@ export {
   harnessAccountSourceListResultSchema,
   harnessAccountInspectParamsSchema,
   harnessAccountInspectResultSchema,
+  harnessAccountUnavailableReasonSchema,
   harnessAccountListParamsSchema,
   harnessAccountListResultSchema,
 } from "./harness-accounts.js";
@@ -57,6 +58,7 @@ export type {
   HarnessAccountSourceListResult,
   HarnessAccountInspectParams,
   HarnessAccountInspectResult,
+  HarnessAccountUnavailableReason,
   HarnessAccountListParams,
   HarnessAccountListResult,
 } from "./harness-accounts.js";
@@ -385,3 +387,28 @@ export {
   type CodexSshConnection,
   type CodexSshDraft,
 } from "./remote-connections.js";
+
+export {
+  COMPOSER_DELEGATE_METHOD,
+  DELEGATION_CATALOG_METHOD,
+  HANDOFF_PREVIEW_METHOD,
+  HANDOFF_SEND_METHOD,
+  composerDelegateParamsSchema,
+  composerDelegateResultSchema,
+  delegationCatalogParamsSchema,
+  delegationCatalogResultSchema,
+  handoffPreviewParamsSchema,
+  handoffPreviewResultSchema,
+  handoffSendParamsSchema,
+  handoffSendResultSchema,
+} from "./composer-routing.js";
+export type {
+  ComposerDelegateParams,
+  ComposerDelegateResult,
+  DelegationCatalogParams,
+  DelegationCatalogResult,
+  HandoffPreviewParams,
+  HandoffPreviewResult,
+  HandoffSendParams,
+  HandoffSendResult,
+} from "./composer-routing.js";

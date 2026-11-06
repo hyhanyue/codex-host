@@ -267,14 +267,16 @@ export function createAccountsSettingsPage(
                 return;
               usageByAccountId.set(
                 account.accountId,
-                result.accountCredits
-                  ? {
-                      status: "ready",
-                      credits: result.accountCredits,
-                      freshness: result.freshness,
-                      observedAt: result.observedAt,
-                    }
-                  : { status: "empty" },
+                result.refreshFailed
+                  ? { status: "error" }
+                  : result.accountCredits
+                    ? {
+                        status: "ready",
+                        credits: result.accountCredits,
+                        freshness: result.freshness,
+                        observedAt: result.observedAt,
+                      }
+                    : { status: "empty" },
               );
             } catch {
               if (context.signal.aborted || usageByAccountId.get(account.accountId) !== loading)

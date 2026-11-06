@@ -53,6 +53,33 @@ describe("read-only Harness accounts", () => {
     });
   });
 
+  it("reports validated availability without returning CLI diagnostics", async () => {
+    const signedOut = Object.assign(adapter("signed-out"), {
+      inspectAccount: async () => {
+        throw Object.assign(new Error("private diagnostic"), {
+          accountUnavailableReason: "authenticationRequired",
+        });
+      },
+    });
+    const failed = Object.assign(adapter("failing-agent"), {
+      inspectAccount: async () => {
+        throw new Error("private diagnostic");
+      },
+    });
+    await expect(inspectHarnessAccount(signedOut, [])).resolves.toMatchObject({
+      account: null,
+      unavailableReason: "authenticationRequired",
+    });
+    await expect(inspectHarnessAccount(failed, [])).resolves.toMatchObject({
+      account: null,
+      unavailableReason: "failed",
+    });
+    await expect(inspectHarnessAccount(adapter("unsupported"), [])).resolves.toMatchObject({
+      account: null,
+      unavailableReason: "unsupported",
+    });
+  });
+
   it("returns only real quota, isolates failure, and uses plugin display metadata without opening Threads", async () => {
     const ready = Object.assign(adapter("sample-agent"), {
       inspectAccount: vi.fn(async () => snapshot),

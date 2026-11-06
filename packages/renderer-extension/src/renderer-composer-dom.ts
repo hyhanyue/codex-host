@@ -48,6 +48,7 @@ import {
   type RendererComposerIndicators,
 } from "./renderer-composer-indicators.js";
 import type { RendererSettingsLocale } from "./settings/localization.js";
+import type { ComposerQuotaSources } from "./renderer-composer-quota.js";
 import type { RendererAdapterStatus } from "./versioned-renderer-adapter.js";
 import { isOrbitComposer } from "./renderer-composer-kind.js";
 import { hasNativeComposerRequest, isNativeComposerRequest } from "./renderer-composer-request.js";
@@ -502,9 +503,12 @@ function usagePlacementAnchor(control: ComposerAgentControl): HTMLElement | null
  */
 export function creditsPlacementAnchor(control: ComposerAgentControl): HTMLElement | null {
   // An unverified picker can be mounted at the Composer's end, outside the toolbar.
-  if (!control.nativePermissionModeControlVerified) return null;
-  const root = control.permissionModePicker?.root;
-  return root?.parentElement ? root : null;
+  const permission = control.nativePermissionModeControlVerified
+    ? control.permissionModePicker?.root
+    : null;
+  if (permission?.parentElement) return permission;
+  const model = control.modelPicker?.root;
+  return model?.parentElement ? model : null;
 }
 
 /**
@@ -813,6 +817,8 @@ export function renderComposerAgentControl(
   locale: RendererSettingsLocale = "en",
   currentCodexAccount: CodexAccountSummary | null = null,
   ownershipError = false,
+  handoffEnabled = false,
+  quotaSources?: ComposerQuotaSources,
 ): boolean {
   if (control.usage === null) {
     control.usage = mountRendererUsageControl(control.composerId, locale);
@@ -861,6 +867,7 @@ export function renderComposerAgentControl(
     availability,
     currentCodexAccount,
     ownershipError,
+    handoffEnabled,
   );
   reconcileComposerNativeControls(
     control,
@@ -896,7 +903,7 @@ export function renderComposerAgentControl(
   control.harnessCommands.setLocale(locale);
   control.harnessCommands.root.hidden = state.agent === "codex";
   control.harnessCommands.root.style.display = state.agent === "codex" ? "none" : "inline-flex";
-  renderRendererCreditsControl(control.credits, accountCredits, locale);
+  renderRendererCreditsControl(control.credits, accountCredits, locale, quotaSources);
   return state.agent !== "codex" && adapterState === "ready" && !submissionBlocked;
 }
 

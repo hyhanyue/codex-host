@@ -10,6 +10,9 @@ export interface CodexAccountControl {
   snapshot(): CodexAccountListResult;
   /** Re-read the official current identity without changing native auth. */
   refresh?(): Promise<CodexAccountListResult>;
+  /** Native auth or backend changes retire the previously confirmed identity. */
+  invalidate?(): void;
+  subscribe?(listener: () => void): () => void;
   currentAccountId(): string | null;
 }
 
