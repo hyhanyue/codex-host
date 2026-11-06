@@ -6,8 +6,6 @@ import {
 import type { RendererCodexAccountState } from "./renderer-codex-account-state.js";
 import type { RendererModelClient } from "./renderer-model-client.js";
 
-export const COMPOSER_QUOTA_AGENTS = ["codex", "kiro-cli", "antigravity"] as const;
-
 export type ComposerQuotaView =
   | { status: "loading" | "empty" | HarnessAccountUnavailableReason }
   | { status: "ready"; credits: AccountCreditsSnapshot; plan?: string | undefined };

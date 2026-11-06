@@ -416,7 +416,9 @@ export function mountRendererCreditsControl(composerId: string): RendererCredits
   const paint = (): boolean => {
     const current = currentSource();
     const active = current && views.get(current.id);
-    const credits = current ? (active?.status === "ready" ? active.credits : null) : fallback;
+    const useFallback =
+      !current || (current.id !== "codex" && (!active || active.status === "loading"));
+    const credits = active?.status === "ready" ? active.credits : useFallback ? fallback : null;
     const visible = Boolean((credits || sources?.agents.length) && control.anchor?.parentElement);
     control.root.style.display = visible ? "inline-flex" : "none";
     if (!visible) {
@@ -447,7 +449,12 @@ export function mountRendererCreditsControl(composerId: string): RendererCredits
 
     const source = selectedSource();
     const view = source ? views.get(source.id) : undefined;
-    const shown = view?.status === "ready" ? view.credits : source ? null : credits;
+    const shown =
+      !source || source.id === current?.id
+        ? credits
+        : view?.status === "ready"
+          ? view.credits
+          : null;
     const nextNavKey = JSON.stringify([locale, sources?.agents, source?.id, current?.id]);
     if (navKey !== nextNavKey) {
       navKey = nextNavKey;
@@ -540,16 +547,15 @@ export function mountRendererCreditsControl(composerId: string): RendererCredits
       const reset =
         sources?.client !== nextSources?.client || sources?.accountKey !== nextSources?.accountKey;
       const changedAgent = sources?.current !== nextSources?.current;
+      const previousCurrent = currentSource()?.id;
       sources = nextSources;
       if (reset) {
         views = new Map();
         pending = new Set();
       }
-      if (reset || changedAgent) {
-        selected = undefined;
-        const current = currentSource();
-        if (current) read(current.id, false);
-      }
+      if (reset || changedAgent) selected = undefined;
+      const current = currentSource();
+      if (current && (reset || current.id !== previousCurrent)) read(current.id, false);
       return paint();
     },
     dispose() {

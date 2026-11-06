@@ -8,6 +8,7 @@ import {
   decodeHarnessPluginRoute,
   harnessIdSchema,
   permissionModeFixedAtCreate,
+  type HarnessAccountSource,
   type HarnessCommandDescriptor,
   type HarnessPluginDescriptor,
   type HarnessModelCatalog,
@@ -112,7 +113,7 @@ import {
   type RendererDelegationMentionControl,
 } from "./renderer-delegation-mention.js";
 import { compatibleRendererPluginPresentation, rendererAgentLabel } from "./renderer-agent-icon.js";
-import { COMPOSER_QUOTA_AGENTS, readComposerQuota } from "./renderer-composer-quota.js";
+import { readComposerQuota } from "./renderer-composer-quota.js";
 import {
   createNativeScheduleWorkspaceThread,
   isNativeProjectThreadCreator,
@@ -179,6 +180,7 @@ export { resolveCurrentCodexAccountId } from "./renderer-codex-account-state.js"
 
 interface HostHarnessAvailabilityState {
   plugins: readonly HarnessPluginDescriptor[] | null;
+  quotaSources: readonly HarnessAccountSource[];
   directoryClient: RendererModelClient | null;
   directoryError?: string;
   codexAccounts: RendererCodexAccountState | null;
@@ -887,6 +889,7 @@ export function installRendererBindingProbe(
   };
   const createHostHarnessAvailabilityState = (): HostHarnessAvailabilityState => ({
     plugins: null,
+    quotaSources: [],
     directoryClient: null,
     codexAccounts: null,
     availability: {},
@@ -1099,12 +1102,18 @@ export function installRendererBindingProbe(
       mounted.ownershipStatus === "ready" && Boolean(client?.previewHandoff && client.sendHandoff);
     const state = controller.get(mounted.composer);
     const locked = state.phase === "locked";
+    const availability = composerAvailability(mounted);
+    const hostState = hostId ? hostHarnessAvailabilityState(hostId) : null;
+    const quotaSources =
+      hostState?.directoryClient === client
+        ? hostState.quotaSources.filter(({ harnessId }) => availability[harnessId] === "ready")
+        : [];
     const externalSubmissionReady = renderComposerAgentControl(
       mounted.control,
       state,
       composerAdapterState(mounted),
       controller.isSwitching(mounted.composer) || mounted.ownershipStatus === "loading",
-      composerAvailability(mounted),
+      availability,
       mounted.modelView,
       mounted.permissionModeView,
       mounted.usage,
@@ -1115,15 +1124,20 @@ export function installRendererBindingProbe(
       handoffEnabled,
       client &&
         hostId &&
-        (!mounted.accountCredits || COMPOSER_QUOTA_AGENTS.some((agent) => agent === state.agent))
+        (!mounted.accountCredits ||
+          state.agent === "codex" ||
+          quotaSources.some(({ harnessId }) => harnessId === state.agent))
         ? {
             client,
             accountKey: accounts?.readyAccountId ?? null,
             current: state.agent,
-            agents: COMPOSER_QUOTA_AGENTS.filter(
-              (agent) =>
-                agent === "codex" || agent === state.agent || Boolean(pluginForHost(hostId, agent)),
-            ).map((agent) => ({ id: agent, label: delegationTarget(mounted, agent).label })),
+            agents: [
+              { id: "codex", label: rendererAgentLabel("codex") },
+              ...quotaSources.map(({ harnessId, harnessName }) => ({
+                id: harnessId,
+                label: harnessName,
+              })),
+            ],
             read: (agent, refresh) => readComposerQuota(client, accounts, agent, refresh),
           }
         : undefined,
@@ -2474,6 +2488,7 @@ export function installRendererBindingProbe(
     if (state.request?.client === client) return state.request.promise;
     if (state.directoryClient !== client) {
       state.plugins = null;
+      state.quotaSources = [];
       state.availability = {};
       state.errors = {};
       state.webUi = {};
@@ -2481,7 +2496,8 @@ export function installRendererBindingProbe(
     }
     const generation = ++state.requestGeneration;
     const promise = (async () => {
-      if (!state.plugins || force) {
+      const refreshDirectory = !state.plugins || force;
+      if (refreshDirectory) {
         try {
           if (!client.listHarnessPlugins)
             throw new Error("This Host does not support Harness plugin discovery");
@@ -2530,10 +2546,29 @@ export function installRendererBindingProbe(
         }
       }
       const agentsToInspect = force
-        ? state.plugins.map(({ id }) => id)
+        ? (state.plugins ?? EMPTY_PLUGINS).map(({ id }) => id)
         : passiveHarnessAvailabilityAgents(state.availability, state.errors);
-      await Promise.all(
-        agentsToInspect.map(async (agent) => {
+      const quotaSourceRequest =
+        refreshDirectory && client.inspectHarnessAccount
+          ? client.listHarnessAccountSources?.().then(
+              ({ sources }) => {
+                if (
+                  disposed ||
+                  generation !== state.requestGeneration ||
+                  modelClientForHost(hostId) !== client
+                )
+                  return;
+                state.quotaSources = sources;
+                for (const mounted of mountedByComposer.values()) {
+                  if (mounted.hostId === hostId) renderMounted(mounted);
+                }
+              },
+              () => undefined,
+            )
+          : undefined;
+      await Promise.all([
+        quotaSourceRequest,
+        ...agentsToInspect.map(async (agent) => {
           let status: RendererAgentAvailability = "error";
           let nextError: CodexhostError | undefined;
           let webUiAvailable = false;
@@ -2607,7 +2642,7 @@ export function installRendererBindingProbe(
           }
           publishConnectionStatus();
         }),
-      );
+      ]);
       if (generation !== state.requestGeneration || disposed) return;
       if (retryableHarnessAvailabilityAgents(state.availability, state.errors).length === 0) {
         resetHarnessAvailabilityRetry(hostId);
