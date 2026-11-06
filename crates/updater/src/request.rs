@@ -34,6 +34,10 @@ pub(crate) struct NpmInstallation {
     pub(crate) npm_launcher_path: PathBuf,
     /// The platform package whose executables Windows must close before npm replaces them.
     pub(crate) npm_package_root: PathBuf,
+    pub(crate) meta_path: PathBuf,
+    pub(crate) meta_sha256: String,
+    pub(crate) platform_path: PathBuf,
+    pub(crate) platform_sha256: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -148,6 +152,11 @@ impl UpdateRequest {
                 require_absolute_file(&npm.npm_cli_path, "npm CLI")?;
                 require_absolute_file(&npm.npm_launcher_path, "npm codexhost launcher")?;
                 require_absolute_path(&npm.npm_package_root, "npm platform package root")?;
+                require_absolute_file(&npm.meta_path, "npm meta tarball")?;
+                require_absolute_file(&npm.platform_path, "npm platform tarball")?;
+                if !valid_sha256(&npm.meta_sha256) || !valid_sha256(&npm.platform_sha256) {
+                    return Err("npm tarball SHA-256 must be lowercase hexadecimal".into());
+                }
             }
             Installation::WindowsInstaller(windows) => {
                 if !cfg!(target_os = "windows") {

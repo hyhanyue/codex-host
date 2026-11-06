@@ -1,10 +1,10 @@
 # github-release-background-update Specification
 
 ## Purpose
-TBD - created by archiving change implement-github-release-update-flow. Update Purpose after archive.
+Describe how the fork discovers, verifies, prepares, and installs updates.
 ## Requirements
 ### Requirement: Host discovers one stable GitHub Release
-The update capability SHALL discover the latest stable codexhost version only from `https://api.github.com/repos/BytePioneer-AI/codex-host/releases/latest`, SHALL compare its `v`-prefixed tag with the packaged current SemVer, and SHALL keep check failure non-blocking for normal application launch. It MUST NOT require a custom manifest, checksum sidecar, codexhost server, login, or embedded GitHub credential.
+The update capability SHALL use only published GitHub Releases from `hyhanyue/codex-host` with stable `v<semver>` tags that resolve to commits in the history of `codexhost-code-changes`. It SHALL select the highest eligible SemVer and compare it with the packaged version. It SHALL verify the actual Git tag and branch ancestry independently of the Release’s target metadata. An empty list or a list with no eligible Release SHALL be a successful check with no update. Branch commits and Git tags without a Release do not advertise updates. Checking SHALL remain non-blocking and work without a login or embedded GitHub credential.
 
 #### Scenario: New stable Release exists
 - **WHEN** GitHub returns a non-draft, non-prerelease Release with a valid newer `v<semver>` tag
@@ -34,14 +34,14 @@ The update capability SHALL read strict packaged distribution metadata and resol
 
 #### Scenario: npm distribution starts an update
 - **WHEN** packaged metadata identifies npm and the fixed npm runtime paths are available
-- **THEN** Host SHALL prepare the exact discovered version through the npm update path and SHALL NOT select a DMG or EXE
+- **THEN** Host SHALL require `codexhost-cli-<version>.tgz` and `codexhost-cli-<version>-<target>.tgz` from the eligible Fork Release. Both assets need an exact download URL, positive size, and SHA-256 digest. If either asset is unavailable, the Release remains visible and installation is disabled. The native helper SHALL recheck both digests and install the local tarballs together with npm in offline mode.
 
 #### Scenario: Installer metadata does not match host target
 - **WHEN** packaged metadata declares a target different from the running platform and architecture
 - **THEN** automatic update SHALL fail before download or process shutdown
 
 ### Requirement: Installer preparation reports bounded download progress
-The Host and Update Manager SHALL persist a `downloading` status for installer artifacts with nonnegative `downloadedBytes` and a positive `totalBytes` derived from the verified GitHub asset size. Renderer SHALL be able to read that status while preparation is active. Download completion SHALL be followed by the existing size and SHA-256 verification before the operation becomes `prepared` and before the Launcher stops the managed Desktop. npm updates MAY remain phase-only because npm installation occurs after the managed application exits.
+The Host and Update Manager SHALL persist a `downloading` status for installer artifacts with nonnegative `downloadedBytes` and a positive `totalBytes` derived from the verified GitHub asset size. Renderer SHALL be able to read that status while preparation is active. Download completion SHALL be followed by the existing size and SHA-256 verification before the operation becomes `prepared` and before the Launcher stops the managed Desktop. For npm, download progress combines both tarballs, and both must be verified before handoff.
 
 #### Scenario: macOS DMG download is active
 - **WHEN** a verified macOS Release asset is being downloaded
@@ -82,7 +82,7 @@ The update capability SHALL store strict local operation status outside the inst
 - **THEN** Host SHALL return its bounded error and allow a later explicit retry
 
 ### Requirement: Release installation remains platform-specific
-The existing background manager and native helper SHALL continue to use exact-version npm installation, per-user silent Inno Setup, and same-filesystem macOS App replacement with installed distribution verification and relaunch. Permission or platform-policy failure SHALL be reported without automatic elevation.
+The existing background manager and native helper SHALL continue to use offline installation of the two verified npm tarballs, per-user silent Inno Setup, and same-filesystem macOS App replacement with installed distribution verification and relaunch. Permission or platform-policy failure SHALL be reported without automatic elevation.
 
 #### Scenario: macOS parent directory is not writable
 - **WHEN** the Updater cannot stage or replace the App in its current parent directory
@@ -94,6 +94,6 @@ Strict distribution metadata SHALL accept `linux-arm64`, SHALL require it to mat
 #### Scenario: ARM64 Linux npm installation checks for updates
 - **WHEN** packaged metadata identifies distribution `npm` and target `linux-arm64` on a `linux/arm64` host
 - **THEN** Host resolves the verified npm package paths and reports npm installation availability
-- **AND** update preparation uses exact-version npm installation
+- **AND** update preparation uses offline installation of the two verified npm tarballs
 - **AND** no DMG, EXE, `.deb`, or `.rpm` installer asset is selected
 

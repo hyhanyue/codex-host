@@ -199,13 +199,16 @@ describe("runtime maintenance", () => {
     },
   );
   it.skipIf(process.platform === "win32")(
-    "rejects a downgrade and coalesces duplicate scheduling",
+    "rejects package changes and coalesces duplicate restarts",
     async () => {
       const f = await fixture(true);
       const statusPath = path.join(f.root, "data/remote-update.json");
-      spawn.mockImplementation(() => helperStartedBy(statusPath, "0.12.0", process.pid));
       await expect(f.control.start("0.10.0")).rejects.toThrow("downgrades");
-      const result = await Promise.all([f.control.start("0.12.0"), f.control.start("0.12.0")]);
+      await expect(f.control.start("0.12.0")).rejects.toThrow("verified Fork Release");
+      expect(spawn).not.toHaveBeenCalled();
+      await writeFile(f.runtimePath, "// build two");
+      spawn.mockImplementation(() => helperStartedBy(statusPath, "0.11.0", process.pid));
+      const result = await Promise.all([f.control.start("0.11.0"), f.control.start("0.11.0")]);
       expect(result.map((r) => r.update.phase)).toEqual(["installing", "installing"]);
       await expect(f.control.start("0.13.0")).rejects.toThrow("already pending");
     },
@@ -239,6 +242,7 @@ describe("runtime maintenance", () => {
       // A short real deadline instead of a fake clock: start() does real filesystem work before
       // it arms the deadline, so fake time could run out before the deadline even exists.
       const f = await fixture(true, 100);
+      await writeFile(f.runtimePath, "// build two");
       const statusPath = path.join(f.root, "data/remote-update.json");
       const helperPid = 42_424;
       const kill = vi.spyOn(process, "kill").mockImplementation(((
@@ -263,7 +267,7 @@ describe("runtime maintenance", () => {
         });
         return starter;
       });
-      await expect(f.control.start("0.12.0")).rejects.toThrow("Remote updater did not start");
+      await expect(f.control.start("0.11.0")).rejects.toThrow("Remote updater did not start");
       expect(kill).toHaveBeenCalledWith(helperPid);
       expect(JSON.parse(await readFile(statusPath, "utf8"))).toMatchObject({
         phase: "failed",
@@ -272,14 +276,14 @@ describe("runtime maintenance", () => {
       expect(
         JSON.parse(await readFile(path.join(f.root, "data/remote-update.cancel"), "utf8")),
       ).toEqual({
-        targetVersion: "0.12.0",
+        targetVersion: "0.11.0",
       });
       // A late helper write still surfaces through status() after the recorded failure.
       await writeFile(
         statusPath,
         JSON.stringify({
           phase: "installing",
-          targetVersion: "0.12.0",
+          targetVersion: "0.11.0",
           error: null,
           updaterPid: helperPid,
         }),
@@ -294,6 +298,7 @@ describe("runtime maintenance", () => {
     "still reads helper PID when exit precedes stdout data",
     async () => {
       const f = await fixture(true);
+      await writeFile(f.runtimePath, "// build two");
       const statusPath = path.join(f.root, "data/remote-update.json");
       spawn.mockImplementation(() => {
         const starter = new EventEmitter() as EventEmitter & { stdout: EventEmitter };
@@ -307,7 +312,7 @@ describe("runtime maintenance", () => {
               statusPath,
               JSON.stringify({
                 phase: "installing",
-                targetVersion: "0.12.0",
+                targetVersion: "0.11.0",
                 error: null,
                 updaterPid: process.pid,
               }),
@@ -316,8 +321,8 @@ describe("runtime maintenance", () => {
         });
         return starter;
       });
-      await expect(f.control.start("0.12.0")).resolves.toMatchObject({
-        update: { phase: "installing", targetVersion: "0.12.0" },
+      await expect(f.control.start("0.11.0")).resolves.toMatchObject({
+        update: { phase: "installing", targetVersion: "0.11.0" },
       });
     },
   );

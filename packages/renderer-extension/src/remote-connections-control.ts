@@ -42,15 +42,7 @@ export function remoteUpdateTarget(
   )
     return null;
   if (["installing", "restarting", "failed"].includes(remote.update.phase)) return null;
-  // Unpublished prereleases need an explicit action; don't infer ordering from a label.
-  const stable = /^(\d+)\.(\d+)\.(\d+)$/u;
-  if (!stable.test(local.runningVersion) || !stable.test(remote.installedVersion)) return null;
-  const left = local.runningVersion.split(".").map(Number);
-  const right = remote.installedVersion.split(".").map(Number);
-  const index = left.findIndex((part, index) => part !== right[index]);
-  if (index >= 0 && (left[index] ?? 0) > (right[index] ?? 0)) return local.runningVersion;
-  if (index < 0 && remote.restartRequired) return remote.installedVersion;
-  return null;
+  return remote.restartRequired ? remote.installedVersion : null;
 }
 
 export function createRemoteConnectionsControl(

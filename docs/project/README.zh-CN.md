@@ -73,6 +73,8 @@ npm install -g @codexhost/cli
 codexhost
 ```
 
+本 Fork 的安装只检查 `hyhanyue/codex-host` 中标签提交位于 `codexhost-code-changes` 历史上的正式 GitHub Release。npm 安装的更新需要将 `release:npm:meta` 和 `release:npm` 打包生成的 `codexhost-cli-<版本>.tgz` 与 `codexhost-cli-<版本>-<平台>.tgz` 一起上传至该 Release。缺少任一安装包时，仍可查看发布说明。远程服务更新需先在远程电脑安装相应 Fork Release，再重启服务。
+
 **方式二：安装包**（macOS / Windows）
 
 从 [Releases](https://github.com/BytePioneer-AI/codex-host/releases) 下载对应平台的安装包。

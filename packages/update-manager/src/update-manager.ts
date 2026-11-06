@@ -41,6 +41,8 @@ export interface CommonUpdateOptions {
 }
 
 export interface NpmUpdateOptions extends CommonUpdateOptions {
+  metaArtifact: ArtifactSource;
+  platformArtifact: ArtifactSource;
   nodePath: string;
   npmCliPath: string;
   npmLauncherPath: string;
@@ -103,6 +105,10 @@ interface InternalRequest {
         npm_cli_path: string;
         npm_launcher_path: string;
         npm_package_root: string;
+        meta_path: string;
+        meta_sha256: string;
+        platform_path: string;
+        platform_sha256: string;
       }
     | {
         kind: "windows-installer";
@@ -349,14 +355,26 @@ export function createBackgroundUpdateManager(
     installation: BackgroundUpdateInstallation,
     sourceValue: ArtifactSource,
     fileName: string,
-  ): Promise<{ source: ArtifactSource; artifactPath: string }> {
+    aggregate?: { completedBytes: number; totalBytes: number | undefined },
+  ): Promise<{ source: ArtifactSource; artifactPath: string; bytes: number }> {
     const source = validateArtifact(sourceValue);
     const temporaryPath = path.join(common.workDirectory, `.${fileName}.download`);
     const artifactPath = path.join(common.workDirectory, fileName);
-    const progress = progressReporter(common.statusPath, common.version, installation, source.size);
+    const progress = progressReporter(
+      common.statusPath,
+      common.version,
+      installation,
+      aggregate ? aggregate.totalBytes : source.size,
+    );
+    const report = ({ downloadedBytes, totalBytes }: ArtifactDownloadProgress): void => {
+      progress.update({
+        downloadedBytes: downloadedBytes + (aggregate?.completedBytes ?? 0),
+        totalBytes: aggregate ? aggregate.totalBytes : totalBytes,
+      });
+    };
     try {
-      const result = await download(source, temporaryPath, progress.update);
-      progress.update({ downloadedBytes: result.bytes, totalBytes: source.size });
+      const result = await download(source, temporaryPath, report);
+      report({ downloadedBytes: result.bytes, totalBytes: source.size });
       await progress.flush();
       const finalUrl = new URL(result.finalUrl);
       if (finalUrl.protocol !== "https:" || finalUrl.username || finalUrl.password) {
@@ -364,7 +382,7 @@ export function createBackgroundUpdateManager(
       }
       await verifyDownloadedArtifact(source, temporaryPath, result);
       await rename(temporaryPath, artifactPath);
-      return { source, artifactPath };
+      return { source, artifactPath, bytes: result.bytes };
     } catch (error) {
       await rm(temporaryPath, { force: true });
       await progress.flush();
@@ -407,8 +425,7 @@ export function createBackgroundUpdateManager(
     async prepareNpm(options: NpmUpdateOptions): Promise<PreparedBackgroundUpdate> {
       const common = await prepareCommon(options, "npm");
       try {
-        return await finalize(common, {
-          kind: "npm",
+        const npmPaths = {
           node_path: await requireRegularFile(options.nodePath, "npm Node.js executable"),
           npm_cli_path: await requireRegularFile(options.npmCliPath, "npm CLI"),
           npm_launcher_path: await requireRegularFile(
@@ -416,6 +433,30 @@ export function createBackgroundUpdateManager(
             "npm codexhost launcher",
           ),
           npm_package_root: requireAbsolutePath(options.packageRoot, "npm platform package root"),
+        };
+        const { metaArtifact, platformArtifact } = options;
+        const totalBytes =
+          metaArtifact.size === undefined || platformArtifact.size === undefined
+            ? undefined
+            : metaArtifact.size + platformArtifact.size;
+        const meta = await prepareArtifact(common, "npm", metaArtifact, "meta.tgz", {
+          completedBytes: 0,
+          totalBytes,
+        });
+        const platformPackage = await prepareArtifact(
+          common,
+          "npm",
+          platformArtifact,
+          "platform.tgz",
+          { completedBytes: meta.bytes, totalBytes },
+        );
+        return await finalize(common, {
+          kind: "npm",
+          ...npmPaths,
+          meta_path: meta.artifactPath,
+          meta_sha256: meta.source.sha256,
+          platform_path: platformPackage.artifactPath,
+          platform_sha256: platformPackage.source.sha256,
         });
       } catch (error) {
         await writeFailedStatus(common.statusPath, common.version, "npm", error);

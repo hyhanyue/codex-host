@@ -16,6 +16,7 @@ import {
   resolveInstalledUpdateContext,
   readRuntimeMetadata,
   selectInstallerReleaseArtifact,
+  selectNpmReleaseArtifacts,
   type BackgroundUpdateManager,
   type BackgroundUpdateStatus,
   type CodexhostLatestRelease,
@@ -36,7 +37,7 @@ export interface CreateHostUpdateCoordinatorOptions {
   platform?: NodeJS.Platform;
   architecture?: string;
   manager?: BackgroundUpdateManager;
-  fetchLatest?(signal?: AbortSignal): Promise<CodexhostLatestRelease>;
+  fetchLatest?(signal?: AbortSignal): Promise<CodexhostLatestRelease | null>;
 }
 
 function boundedError(error: unknown): string {
@@ -71,7 +72,7 @@ export function createHostUpdateCoordinator(
     });
     return contextPromise;
   };
-  const fetchLatest: (signal?: AbortSignal) => Promise<CodexhostLatestRelease> =
+  const fetchLatest: (signal?: AbortSignal) => Promise<CodexhostLatestRelease | null> =
     options.fetchLatest ??
     (async (signal?: AbortSignal) => {
       const timeoutSignal = AbortSignal.timeout(15_000);
@@ -81,7 +82,9 @@ export function createHostUpdateCoordinator(
         platform,
         signal: requestSignal,
       });
-      return authenticated ?? fetchLatestGitHubRelease({ signal: requestSignal });
+      return authenticated === undefined
+        ? fetchLatestGitHubRelease({ signal: requestSignal })
+        : authenticated;
     });
   let candidate: CodexhostLatestRelease | null = null;
 
@@ -97,15 +100,12 @@ export function createHostUpdateCoordinator(
     return status ? publicStatus(status) : null;
   }
 
-  async function installable(
-    context: InstalledUpdateContext,
-    release: CodexhostLatestRelease,
-  ): Promise<boolean> {
-    if (context.installation.kind === "npm") return true;
+  function installable(context: InstalledUpdateContext, release: CodexhostLatestRelease): boolean {
     const target = context.metadata.target;
-    if (target === "linux-x64" || target === "linux-arm64") return false;
     try {
-      selectInstallerReleaseArtifact(release, target);
+      if (context.installation.kind === "npm") selectNpmReleaseArtifacts(release, target);
+      else if (target === "linux-x64" || target === "linux-arm64") return false;
+      else selectInstallerReleaseArtifact(release, target);
       return true;
     } catch {
       return false;
@@ -137,42 +137,38 @@ export function createHostUpdateCoordinator(
         };
       }
       const status = await latestStatus(context);
+      const empty: UpdateCheckResult = {
+        currentVersion: context.metadata.version,
+        installation: context.installation.kind,
+        latestVersion: null,
+        updateAvailable: false,
+        installationAvailable: false,
+        releaseNotes: null,
+        releaseNotesUrl: null,
+        status,
+        error: null,
+      };
       try {
         const release = await fetchLatest(signal);
         candidate = release;
+        if (!release) return empty;
         const updateAvailable =
           compareSemanticVersions(context.metadata.version, release.version) < 0;
-        let installationAvailable = false;
-        let error: string | null = null;
-        if (updateAvailable) {
-          installationAvailable = await installable(context, release);
-          if (!installationAvailable) {
-            error = "The latest GitHub Release has no verified asset for this installation";
-          }
-        }
+        const installationAvailable = updateAvailable && installable(context, release);
         return {
-          currentVersion: context.metadata.version,
-          installation: context.installation.kind,
+          ...empty,
           latestVersion: release.version,
           updateAvailable,
           installationAvailable,
           releaseNotes: release.releaseNotes,
           releaseNotesUrl: release.releaseNotesUrl,
-          status,
-          error,
+          error:
+            updateAvailable && !installationAvailable
+              ? "The latest GitHub Release has no verified asset for this installation"
+              : null,
         };
       } catch (error) {
-        return {
-          currentVersion: context.metadata.version,
-          installation: context.installation.kind,
-          latestVersion: null,
-          updateAvailable: false,
-          installationAvailable: false,
-          releaseNotes: null,
-          releaseNotesUrl: null,
-          status,
-          error: boundedError(error),
-        };
+        return { ...empty, error: boundedError(error) };
       }
     },
 
@@ -205,6 +201,7 @@ export function createHostUpdateCoordinator(
       try {
         const release = await fetchLatest();
         if (
+          !release ||
           compareSemanticVersions(context.metadata.version, release.version) >= 0 ||
           (candidate && candidate.version !== release.version)
         ) {
@@ -225,6 +222,7 @@ export function createHostUpdateCoordinator(
             if (context.installation.kind === "npm") {
               prepared = await manager.prepareNpm({
                 ...context.installation.options,
+                ...selectNpmReleaseArtifacts(release, context.metadata.target),
                 version: release.version,
                 onPrepared,
               });
