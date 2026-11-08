@@ -33,7 +33,7 @@ describe("platform packagers", () => {
     expect(source).not.toContain("cargo-packager");
   });
 
-  it("publishes one tag-bound four-platform installer and npm release", async () => {
+  it("publishes one tag-bound macOS installer and npm release", async () => {
     const [workflow, releaseBuilder, releaseClient, releaseValidation] = await Promise.all([
       readFile(path.join(root, ".github/workflows/release-packages.yml"), "utf8"),
       readFile(path.join(root, "scripts/release/prepare-payload.mjs"), "utf8"),
@@ -58,31 +58,22 @@ describe("platform packagers", () => {
     );
 
     expect(workflow).toContain("codexhost-*.dmg");
-    expect(workflow).toContain("codexhost-*.exe");
+    expect(workflow).not.toContain("codexhost-*.exe");
     expect(workflow).not.toContain("codexhost-*.msi");
     expect(workflow).toContain("npm run release:npm --");
     expect(workflow).toContain("Build npm package from installer outputs");
-    expect(workflow).toContain("Build and smoke-test Linux npm package");
-    const linuxPackageStep = workflow.slice(
-      workflow.indexOf("Build and smoke-test Linux npm package"),
-    );
-    const linuxPackageCommand = linuxPackageStep.slice(0, linuxPackageStep.indexOf("- name:", 1));
-    expect(linuxPackageCommand).toContain("scripts/release/smoke-npm-package.mjs");
-    expect(linuxPackageCommand).not.toContain("--skip-build");
+    expect(workflow).not.toContain("Build and smoke-test Linux npm package");
     expect(workflow).toContain("--skip-build");
     expect(workflow).toContain("--pack");
     expect(workflow).toContain("codexhost-cli-*-${{ matrix.target }}.tgz");
     expect(workflow).toContain("Build installer package");
-    expect(workflow).toContain("if: runner.os != 'Linux'");
-    expect(workflow).toContain("target: linux-x64");
-    expect(workflow).toContain("runner: ubuntu-22.04");
-    expect(workflow).toContain(
-      "--require-hashes --only-binary :all: -r scripts/release/linux-zigbuild-requirements.txt",
-    );
-    expect(workflow).toContain("rustTarget: x86_64-unknown-linux-gnu");
-    expect(workflow).toContain("target: linux-arm64");
-    expect(workflow).toContain("runner: ubuntu-22.04-arm");
-    expect(workflow).toContain("rustTarget: aarch64-unknown-linux-gnu");
+    expect([...workflow.matchAll(/- target: (\S+)/gu)].map((match) => match[1])).toEqual([
+      "macos-arm64",
+      "macos-x64",
+    ]);
+    expect(workflow).not.toMatch(/(?:runs-on|runner): (?:ubuntu|windows)/u);
+    expect(workflow).toContain("NPM_RELEASE_TARGETS: macos-arm64,macos-x64");
+    expect(workflow.match(/--targets "\$NPM_RELEASE_TARGETS"/gu)).toHaveLength(2);
     expect(workflow).toContain("Build npm package");
     expect(workflow).toContain("release:npm:meta");
     expect(workflow).toContain("release:npm:publish");
@@ -96,10 +87,16 @@ describe("platform packagers", () => {
     expect(workflow).toContain("publish-release:");
     const publishRelease = workflow.slice(workflow.indexOf("  publish-release:"));
     expect(publishRelease).toContain("gh release create");
-    expect(publishRelease).toContain('"codexhost-${VERSION}-windows-x64.exe"');
-    expect(publishRelease).toContain('"codexhost-${VERSION}-windows-arm64.exe"');
+    expect(publishRelease).not.toContain('"codexhost-${VERSION}-windows-x64.exe"');
+    expect(publishRelease).not.toContain('"codexhost-${VERSION}-windows-arm64.exe"');
     expect(publishRelease).toContain('"codexhost-${VERSION}-macos-x64.dmg"');
     expect(publishRelease).toContain('"codexhost-${VERSION}-macos-arm64.dmg"');
+    expect(publishRelease).not.toContain("mapfile");
+    expect(publishRelease).toContain("while IFS= read -r -d '' match; do");
+    expect(publishRelease).toContain('"$match_count" -ne 1');
+    expect(publishRelease).toContain("match_count=0");
+    expect(publishRelease).not.toContain("${#matches[@]}");
+    expect(publishRelease).toContain('! -s "${matches[0]}"');
     expect(publishRelease).not.toContain('"codexhost-cli-${VERSION}');
     expect(workflow).not.toContain("softprops/action-gh-release");
     expect(workflow).not.toContain("codexhost-*.sha256");

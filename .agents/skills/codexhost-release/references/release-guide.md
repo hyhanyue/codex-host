@@ -173,7 +173,7 @@ skip_npm=false
 
 ### 手动发布的可选 CI 门禁
 
-手动运行 `Release packages` 时，`skip_ci` 默认是 `false`：最多等待 30 分钟并要求确切提交的四项基线 CI job 成功，发布前复验同一 run / attempt。
+手动运行 `Release packages` 时，`skip_ci` 默认是 `false`：最多等待 30 分钟并要求确切提交的 `Check macos-26` 基线 CI job 成功，发布前复验同一 run / attempt。
 
 用户明确授权后可设为 `true`：不等待、不查询或校验 CI；即使没有 CI、CI 未完成或失败，也继续执行其余发布流程。版本、annotated Tag、Release Notes、提交在 `main`、构建及产物校验保持不变。跳过记录写入 `release-evidence.json` 和 Actions Summary，并发出警告，不视为 CI 通过。此设置可与 `github_prerelease` 和 `skip_npm` 组合，恢复或重启发布时需重新传入。
 
@@ -181,14 +181,15 @@ skip_npm=false
 
 ## 自动发布结果
 
+后续工作流仅使用 macOS runner；旧标签和已有产物不变。使用新工作流手动恢复旧标签时，先核对旧打包脚本对 `--targets` 的支持，不通过缺失产物例外绕过检查。
+
 Tag 推送后，GitHub Actions 会自动：
 
 - 校验 Tag、npm 版本和 Cargo Workspace 版本一致。
-- 构建 Windows x64/arm64 EXE。
 - 构建 macOS x64/arm64 DMG。
-- 发布 macOS、Windows、Linux 的 x64/arm64 共六个平台 npm 包和 `@codexhost/cli` 元包。
+- 发布 macOS x64/arm64 两个平台 npm 包和仅声明这两个平台依赖的 `@codexhost/cli` 元包。
 - 根据版本及手动发布输入创建公开 GitHub Release Prerelease 或正式 Release；`test` 渠道不创建 GitHub Release。
-- GitHub Release 只上传四个安装包，不上传 npm tarball。
+- GitHub Release 只上传两个 macOS DMG，不上传 npm tarball。
 
 ## 失败处理
 

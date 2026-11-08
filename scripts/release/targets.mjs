@@ -70,6 +70,19 @@ export function supportedReleaseTargets() {
   return Object.keys(RELEASE_TARGETS);
 }
 
+// Release automation selects an explicit subset; manual tooling retains all targets.
+export function resolveReleaseTargets(targets = supportedReleaseTargets()) {
+  const selected = typeof targets === "string" ? targets.split(",") : targets;
+  if (!Array.isArray(selected) || selected.length === 0) {
+    throw new Error("release targets must be a non-empty list");
+  }
+  for (const target of selected) releaseTarget(target);
+  if (new Set(selected).size !== selected.length) {
+    throw new Error("release targets must not contain duplicates");
+  }
+  return selected;
+}
+
 export function installerReleaseTargets() {
   return supportedReleaseTargets().filter(
     (target) => RELEASE_TARGETS[target].installerArchitecture !== undefined,

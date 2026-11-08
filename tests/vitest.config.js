@@ -52,9 +52,8 @@ const include = [
 const platformSensitive =
   /node:(fs|child_process|os|path|net|worker_threads|url)|process\.(platform|env|execPath|kill|pid)|win32|tmpdir|spawn|execFile|MappingStore|mkdtemp|\.exe\b|USERPROFILE|APPDATA|\\\\/;
 
-// CODEXHOST_TEST_SCOPE=platform runs only platform-sensitive files. Secondary
-// OS lanes (macOS and Windows) use it; Linux x64 covers pure-logic files.
-// Linux ARM64 CI runs native checks and package smoke instead of TS tests.
+// CODEXHOST_TEST_SCOPE=platform remains available for focused local checks.
+// The macOS CI job runs the full suite without this filter.
 function platformIndependentFiles() {
   return globSync(include, { cwd: root, exclude: (name) => name === "node_modules" })
     .map((file) => file.replaceAll("\\", "/"))

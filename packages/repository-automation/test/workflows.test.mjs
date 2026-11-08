@@ -28,17 +28,39 @@ describe("workflow and form contracts", () => {
     }
   });
 
-  it("keeps CI job names synchronized with the actual matrix", async () => {
+  it("requires the macOS CI job and retains the full validation suite", async () => {
     const workflow = await read(".github/workflows/ci.yml");
-    expect(workflow).toContain("name: Check ${{ matrix.os }}");
-    for (const name of CI_JOBS.filter((value) => value !== "Check Linux ARM64")) {
-      expect(workflow).toContain(`- ${name.slice("Check ".length)}\n`);
+    expect(CI_JOBS).toEqual(["Check macos-26"]);
+    expect(workflow).toContain("name: Check macos-26");
+    expect(workflow).toContain("runs-on: macos-26");
+    expect(workflow).not.toMatch(/matrix:|inputs\.platform|CODEXHOST_TEST_SCOPE|--exclude/u);
+    for (const command of [
+      "npm run format:check",
+      "npm run lint",
+      "npm run typecheck",
+      "npm run test:typescript",
+      "npm run test:shared-host",
+      "cargo clippy --workspace --all-targets --locked",
+      "npm run test:rust",
+      "node scripts/release/smoke-npm-package.mjs --target macos-arm64",
+    ])
+      expect(workflow).toContain(command);
+    expect(workflow).not.toMatch(/runner\.os|ubuntu|windows|check-linux/u);
+  });
+
+  it("uses only macOS runners for future workflows", async () => {
+    for (const file of ["ci", "release-packages", "repository-maintenance"]) {
+      const workflow = await read(`.github/workflows/${file}.yml`);
+      expect(workflow).not.toMatch(/(?:runs-on|runner): (?:ubuntu|windows)/u);
     }
-    expect(workflow).toContain("name: Check Linux ARM64");
   });
 
   it("builds macOS packages on supported runners with matching architectures", async () => {
     const workflow = await read(".github/workflows/release-packages.yml");
+    expect([...workflow.matchAll(/- target: (\S+)/gu)].map((match) => match[1])).toEqual([
+      "macos-arm64",
+      "macos-x64",
+    ]);
     expect(workflow).toMatch(
       /- target: macos-arm64\s+runner: macos-26\s+rustTarget: aarch64-apple-darwin/u,
     );

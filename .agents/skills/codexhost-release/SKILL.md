@@ -19,6 +19,8 @@ description: 发布 codexhost 正式版、预览版，编写或确认 Release No
 - `docs/operations/repository-maintenance.md`
 - 涉及更新提示时：`packages/update-manager/src/github-release.ts`
 
+此仓库未来自动检查和构建仅运行 macOS；发布工作流产出 ARM64 与 Intel 两个 macOS 平台包和 DMG，不删除既有其他平台版本。旧标签含旧工作流，恢复旧版本前须核对其脚本是否支持新工作流的 `--targets` 参数。
+
 源码和工作流是执行行为的依据。发现指南与当前实现不一致时，说明差异；不要假装已有不支持的发布能力。
 
 ## 1. 确认版本与渠道
@@ -45,7 +47,7 @@ description: 发布 codexhost 正式版、预览版，编写或确认 Release No
 3. 新版本用 `npm run release:prepare -- <version>` 同步四个版本文件，检查 diff。
 4. 执行 `npm run check`。已有无关问题阻断时，报告具体文件、步骤和未执行检查，不顺手修复；不得声称全部通过。
 5. 只提交四个版本文件，使用 `chore: prepare v<version>`，推送 `main`。
-6. 默认确认**标签目标 SHA 对应的 `main push` CI**成功，包含四个基线 job。不能用另一提交的 CI、本地检查、PR CI 或手动单平台 CI 代替。用户明确选择不等待且不校验 CI 时，使用下述手动发布选项；不得将跳过报告为通过。
+6. 默认确认**标签目标 SHA 对应的 `main push` CI**成功，包含 `Check macos-26` 基线 job。不能用另一提交的 CI、本地检查、PR CI 或手动单平台 CI 代替。用户明确选择不等待且不校验 CI 时，使用下述手动发布选项；不得将跳过报告为通过。
 
 CI 失败时查看失败 step 和原始诊断。不自动重试测试或放宽超时；只有核实为可重试的临时故障并获授权后才重跑失败 jobs。重跑完成前不得报告 CI 通过。
 
@@ -95,7 +97,7 @@ skip_npm=false
 
 ### 可选 CI 门禁（仅手动发布）
 
-默认 `skip_ci=false`：等待确切提交的 `main push` CI，最多 30 分钟，四项基线 job 必须成功，发布前再次校验同一 run / attempt。
+默认 `skip_ci=false`：等待确切提交的 `main push` CI，最多 30 分钟，`Check macos-26` 基线 job 必须成功，发布前再次校验同一 run / attempt。
 
 用户明确要求不等待且不校验 CI 时，从 `main` 手动运行 `Release packages`，指定正确的既有 annotated tag 和 `skip_ci=true`；同时保留目标渠道所需的 `github_prerelease`、`skip_npm` 输入。此模式不查询 CI，缺失、失败或未完成的 CI 均不阻止发布，但保留 Tag、版本、Release Notes、提交仍在 `main`、构建和产物校验。Actions Summary 和 `release-evidence.json` 明确记录 CI 已跳过。
 
@@ -116,7 +118,7 @@ skip_npm=false
 
 1. 确切发布 SHA 的 CI 结果，或用户明确授权的 `skip_ci` 及实际跳过记录。
 2. npm 元包及全部目标平台包的版本、目标 dist-tag。
-3. GitHub Release 的 prerelease 标记、正式 latest 是否符合预期及四个安装包。
+3. GitHub Release 的 prerelease 标记、正式 latest 是否符合预期及两个 macOS 安装包。
 4. 静默预览发行没有成为 GitHub latest；不能只凭 `prerelease` 输入推断成功。
 5. 工作区状态、运行链接，以及实际执行 / 阻断 / 跳过的检查。
 
