@@ -267,6 +267,11 @@ export interface RendererDelegationMentionOptions {
   anchorForEditor(editor: HTMLElement): Element | null;
   /** Native commands of the Composer's current Harness, if it has any. */
   readCommands(editor: HTMLElement): RendererDelegationCommandSource | null;
+  /** Open the delegation panel from a new # token. */
+  openConfiguration?(editor: HTMLElement): boolean;
+  preferConfiguration?(editor: HTMLElement): boolean;
+  /** Return true when the target opens a configured delegation draft. */
+  configureTarget?(editor: HTMLElement, target: RendererDelegationTarget): boolean;
   /** Called when the menu opens for an editor, e.g. to refresh live commands. */
   onOpen?(editor: HTMLElement): void;
 }
@@ -645,14 +650,47 @@ export function installRendererDelegationMention(
     const range = { node: trigger.node, start: trigger.start, end: trigger.end, expected };
     inserting = true;
     try {
-      if (entry.kind === "agent") await insertAgent(trigger, range, entry.target);
-      else await runCommand(trigger, range, entry);
+      if (entry.kind === "command") {
+        await runCommand(trigger, range, entry);
+      } else if (options.configureTarget?.(trigger.editor, entry.target)) {
+        if (!deleteNativeRange(trigger.editor, range) && (await selectTriggerText(trigger))) {
+          ownerDocument.execCommand("delete");
+        }
+      } else {
+        await insertAgent(trigger, range, entry.target);
+      }
     } finally {
       inserting = false;
     }
   };
 
   const onKeyDown = (event: KeyboardEvent): void => {
+    if (event.key === "#" && !event.isComposing && !event.ctrlKey && !event.metaKey) {
+      const selection = ownerDocument.getSelection();
+      const caret = selection?.anchorNode;
+      const editor = (event.target as Element | null)?.closest?.<HTMLElement>(
+        '[contenteditable="true"]',
+      );
+      const previous =
+        caret && caret.nodeType === caret.TEXT_NODE && selection
+          ? (caret as Text).data.charAt(selection.anchorOffset - 1)
+          : "";
+      if (
+        editor &&
+        selection?.isCollapsed &&
+        caret &&
+        editor.contains(caret) &&
+        (!previous || /\s/u.test(previous)) &&
+        options.isComposerEditor(editor) &&
+        (options.preferConfiguration?.(editor) || !options.readCommands(editor)) &&
+        options.openConfiguration?.(editor)
+      ) {
+        close();
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        return;
+      }
+    }
     if (!isMenuOpen() || !active || event.isComposing) return;
     // With nothing selectable, only Escape belongs to the menu.
     if (entries.length === 0 && event.key !== "Escape") return;

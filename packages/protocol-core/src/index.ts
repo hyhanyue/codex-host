@@ -14,6 +14,7 @@ export {
   observeCodexRateLimitResetCredits,
   observeCodexRateLimits,
   projectCodexRateLimitsToCredits,
+  projectCodexAccountQuota,
 } from "./codex-native-usage.js";
 export type { CodexRateLimitResetCredits } from "./codex-native-usage.js";
 export { CodexTurnProjector, projectHistoricalTurn } from "./codex-ui-projector.js";

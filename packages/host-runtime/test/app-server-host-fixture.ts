@@ -270,6 +270,7 @@ export function createFixture(
   options: {
     sharedThreads?: SharedThreadBridge;
     externalOnly?: boolean;
+    localNativeHandoff?: boolean;
     environment?: NodeJS.ProcessEnv;
     pluginDirectory?: string;
     codexUsage?: boolean;
@@ -337,6 +338,9 @@ export function createFixture(
     stockCodexPath: "/synthetic/codex",
     arguments: ["app-server"],
     ...(options.externalOnly !== undefined ? { externalOnly: options.externalOnly } : {}),
+    ...(options.localNativeHandoff !== undefined
+      ? { localNativeHandoff: options.localNativeHandoff }
+      : {}),
     desktopInput,
     desktopOutput,
     diagnosticOutput,

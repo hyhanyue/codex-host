@@ -340,7 +340,7 @@ mod tests {
             "schema_version": 1, "version": "1.2.3", "wait_pid": 1,
             "wait_executable": root.join("node"), "runtime_descriptor_path": root.join("desktop.json"),
             "status_path": root.join("status.json"), "restart_target": "web", "data_directory": root.join("data"),
-            "installation": {"kind":"npm", "node_path":root.join("node"), "npm_cli_path":root.join("npm.js"), "npm_launcher_path":root.join("wrapper.js"), "npm_package_root":root.join("package")}
+            "installation": {"kind":"npm", "node_path":root.join("node"), "npm_cli_path":root.join("npm.js"), "npm_launcher_path":root.join("wrapper.js"), "npm_package_root":root.join("package"), "meta_path":root.join("meta.tgz"), "meta_sha256":"0".repeat(64), "platform_path":root.join("platform.tgz"), "platform_sha256":"0".repeat(64)}
         })).unwrap();
         let command = command(&request);
         assert_eq!(command.get_program(), request.installation.launcher_path());
@@ -415,7 +415,7 @@ mod tests {
             "schema_version": 1, "version": "1.2.3", "wait_pid": 1,
             "wait_executable": root.join("node"), "runtime_descriptor_path": root.join("desktop.json"),
             "status_path": root.join("status.json"), "restart_target": "web", "data_directory": data,
-            "installation": {"kind":"npm", "node_path":root.join("node"), "npm_cli_path":root.join("npm.js"), "npm_launcher_path":root.join("wrapper.js"), "npm_package_root":root.join("package")}
+            "installation": {"kind":"npm", "node_path":root.join("node"), "npm_cli_path":root.join("npm.js"), "npm_launcher_path":root.join("wrapper.js"), "npm_package_root":root.join("package"), "meta_path":root.join("meta.tgz"), "meta_sha256":"0".repeat(64), "platform_path":root.join("platform.tgz"), "platform_sha256":"0".repeat(64)}
         })).unwrap();
         let launcher = request.installation.launcher_path();
         let app = request.installation.resources_root().join("app");
@@ -480,7 +480,7 @@ mod tests {
             "schema_version":1, "version":"1.2.3", "wait_pid":1,
             "wait_executable":live.executable, "runtime_descriptor_path":root.join("desktop.json"),
             "status_path":root.join("status.json"), "restart_target":"web", "data_directory":root,
-            "installation":{"kind":"npm", "node_path":live.executable, "npm_cli_path":root.join("npm.js"), "npm_launcher_path":root.join("wrapper.js"), "npm_package_root":root.join("package")}
+            "installation":{"kind":"npm", "node_path":live.executable, "npm_cli_path":root.join("npm.js"), "npm_launcher_path":root.join("wrapper.js"), "npm_package_root":root.join("package"), "meta_path":root.join("meta.tgz"), "meta_sha256":"0".repeat(64), "platform_path":root.join("platform.tgz"), "platform_sha256":"0".repeat(64)}
         })).unwrap();
         let mut owner = serde_json::json!({
             "pid":live.id, "started_at_micros":live.started_at_micros, "executable":live.executable,

@@ -576,6 +576,30 @@ describe("Antigravity Adapter", () => {
     ).toBeNull();
   });
 
+  it("omits malformed fractions and reset timestamps without inventing values", () => {
+    const command = {
+      name: "usage",
+      data: {
+        groups: [
+          {
+            name: "Native pool",
+            buckets: [
+              { window: "5h", remaining_fraction: 1.1 },
+              { window: "weekly", remaining_fraction: 0, reset_time: "not a reset" },
+            ],
+          },
+        ],
+      },
+    };
+    expect(parseAntigravityUsageCommand(command, FETCHED_AT)).toEqual({
+      label: "Native pool · Weekly window",
+      scope: { id: "Native pool", label: "Native pool" },
+      usedPercent: 100,
+      periodType: "weekly",
+      fetchedAt: FETCHED_AT,
+    });
+  });
+
   it("reads quota from the dedicated --print=/usage invocation", async () => {
     const calls: string[][] = [];
     const stdout = [
@@ -593,10 +617,10 @@ describe("Antigravity Adapter", () => {
     expect(snapshot).toMatchObject({ usedPercent: 0, periodType: "five_hour" });
   });
 
-  it("degrades to null when the CLI cannot answer /usage", async () => {
+  it("distinguishes CLI failure from an empty /usage response", async () => {
     await expect(
       fetchAntigravityQuota(() => Promise.reject(new Error("agy is not installed"))),
-    ).resolves.toBeNull();
+    ).rejects.toThrow("agy is not installed");
     await expect(fetchAntigravityQuota(() => Promise.resolve("not json"))).resolves.toBeNull();
   });
 

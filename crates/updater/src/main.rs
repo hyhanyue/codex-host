@@ -168,6 +168,10 @@ mod tests {
                 npm_cli_path: wrong_executable.clone(),
                 npm_launcher_path: wrong_executable,
                 npm_package_root: directory.clone(),
+                meta_path: directory.join("meta.tgz"),
+                meta_sha256: "0".repeat(64),
+                platform_path: directory.join("platform.tgz"),
+                platform_sha256: "0".repeat(64),
             }),
         };
         let error = wait_for_launcher_exit(&request).unwrap_err();

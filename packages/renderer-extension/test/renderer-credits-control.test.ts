@@ -1,31 +1,39 @@
-import { describe, expect, it, vi } from "vitest";
+// @vitest-environment jsdom
+import { afterEach, describe, expect, it } from "vitest";
 
 import {
   creditsPeriodLabel,
   formatRendererCreditsReset,
   productLabel,
   rendererCreditsTone,
+  mountRendererCreditsControl,
   renderRendererCreditsControl,
-  type RendererCreditsControl,
 } from "../src/renderer-credits-control.js";
 import { formatRendererCreditsPercent } from "../src/renderer-usage-control.js";
+
+afterEach(() => document.body.replaceChildren());
 
 describe("Renderer credits control", () => {
   it.each([null, { parentElement: null }])(
     "hides credits and closes the popover without an attached placement anchor (%j)",
     (anchor) => {
-      const root = { style: { display: "inline-flex" } };
-      const trigger = { setAttribute: vi.fn() };
-      const popover = { hidden: false, matches: () => true, hidePopover: vi.fn() };
-      const control = { root, trigger, popover, anchor } as unknown as RendererCreditsControl;
-
-      expect(renderRendererCreditsControl(control, { usedPercent: 19, periodType: "weekly" })).toBe(
-        false,
-      );
-      expect(root.style.display).toBe("none");
-      expect(popover.hidePopover).toHaveBeenCalledOnce();
-      expect(popover.hidden).toBe(true);
-      expect(trigger.setAttribute).toHaveBeenCalledWith("aria-expanded", "false");
+      const control = mountRendererCreditsControl("quota-placement");
+      const attached = document.createElement("button");
+      document.body.append(attached);
+      control.place(attached);
+      const credits = { usedPercent: 19, periodType: "weekly" as const };
+      expect(renderRendererCreditsControl(control, credits)).toBe(true);
+      control.trigger.click();
+      expect(control.trigger.getAttribute("aria-expanded")).toBe("true");
+      control.anchor = anchor === null ? null : document.createElement("button");
+      try {
+        expect(renderRendererCreditsControl(control, credits)).toBe(false);
+        expect(control.root.style.display).toBe("none");
+        expect(control.popover.hidden).toBe(true);
+        expect(control.trigger.getAttribute("aria-expanded")).toBe("false");
+      } finally {
+        control.dispose();
+      }
     },
   );
 

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import { access, mkdir, readFile, realpath, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -5,7 +6,6 @@ import path from "node:path";
 import type { Writable } from "node:stream";
 import {
   currentCodexAccountFromOfficialRead,
-  SingleNativeCodexAccount,
   type CodexAccountControl,
 } from "./account/codex-account-control.js";
 import { officialEnvironment } from "./app-server-host.js";
@@ -110,31 +110,86 @@ export async function prepareLocalCodex(input: {
     clientInfo: { name: "codexhost_identity_reader", version: "1" },
     capabilities: { experimentalApi: true },
   });
-  try {
-    if (!input.deferStart) await scope.start();
-  } catch (error) {
-    await scope.close();
-    identityReader.close();
-    throw error;
-  }
   let current: ReturnType<typeof currentCodexAccountFromOfficialRead> = null;
+  const instanceId = randomUUID();
+  let revision = 0;
+  let identityRequested = false;
+  let pending:
+    | { revision: number; result: ReturnType<NonNullable<CodexAccountControl["refresh"]>> }
+    | undefined;
+  const listeners = new Set<() => void>();
   const snapshot = () => ({
     version: 2 as const,
     currentAccountId: current?.accountId ?? null,
     phase: scope.gate.phase,
-    revision: scope.gate.revision,
+    instanceId,
+    revision,
     accounts: current ? [current] : [],
   });
-  const accounts = new SingleNativeCodexAccount(snapshot, async () => {
-    await scope.start();
-    const response = await scope.owner.controlRequest("account/read", { refreshToken: false });
-    if (response.error) throw new Error("Official Account read failed");
-    current = currentCodexAccountFromOfficialRead(response.result);
-    return snapshot();
+  const changed = () => {
+    revision += 1;
+    for (const listener of listeners) listener();
+  };
+  const invalidate = () => {
+    current = null;
+    changed();
+  };
+  const refresh: NonNullable<CodexAccountControl["refresh"]> = async () => {
+    if (scope.closed) throw new Error("Official Account is unavailable");
+    identityRequested = true;
+    if (scope.gate.phase !== "ready") return snapshot();
+    if (pending?.revision === revision) return pending.result;
+    const before = revision;
+    const result = scope.owner
+      .controlRequest("account/read", { refreshToken: false })
+      .then((response) => {
+        if (before !== revision) return refresh();
+        if (response.error) throw new Error("Official Account read failed");
+        const next = currentCodexAccountFromOfficialRead(response.result);
+        if (JSON.stringify(next) !== JSON.stringify(current)) {
+          current = next;
+          changed();
+        }
+        return snapshot();
+      })
+      .catch((error: unknown) => {
+        if (before === revision && current) invalidate();
+        throw error;
+      })
+      .finally(() => {
+        if (pending?.result === result) pending = undefined;
+      });
+    pending = { revision: before, result };
+    return result;
+  };
+  const unsubscribe = scope.gate.subscribe(() => {
+    invalidate();
+    if (identityRequested && scope.gate.phase === "ready") {
+      void refresh().catch(() => {
+        input.diagnosticOutput.write("codexhost: Codex Account identity could not be read\n");
+      });
+    }
   });
+  try {
+    if (!input.deferStart) await scope.start();
+  } catch (error) {
+    unsubscribe();
+    await scope.close();
+    identityReader.close();
+    throw error;
+  }
   return {
     officialRuntimeScope: scope,
-    accountControl: accounts,
+    accountControl: {
+      snapshot,
+      refresh,
+      invalidate,
+      subscribe(listener) {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+      currentAccountId: () => current?.accountId ?? null,
+    },
     configureStartup: async (configuration) => {
       if (!input.deferStart || scope.closed || (input.remoteControl && startupConfigured)) return;
       const stockCodexPath = await resolveOfficialCodexExecutable(
@@ -178,6 +233,7 @@ export async function prepareLocalCodex(input: {
       if (changed && scope.owner.generation > 0) await scope.stop();
     },
     close: async () => {
+      unsubscribe();
       await scope.close();
       identityReader.close();
     },

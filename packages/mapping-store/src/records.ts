@@ -4,6 +4,7 @@ import {
   hostThreadIdSchema,
   hostTurnIdSchema,
   nativeCheckpointRefSchema,
+  jsonObjectSchema,
   nativeSessionRefSchema,
   nativeTurnRefSchema,
   type HarnessId,
@@ -73,6 +74,22 @@ const storedThreadCoreV1Shape = {
       role: z.string().max(1_024).optional(),
     })
     .strict()
+    .optional(),
+  handoff: z
+    .strictObject({
+      // Frozen Desktop projection of finished segments; the active Session still owns its history.
+      previousTurns: z.array(jsonObjectSchema),
+      fromCodex: z.boolean(),
+      pinned: z.boolean(),
+      deliveries: z.array(
+        z.strictObject({
+          requestId: z.uuid(),
+          digest: z.string(),
+          turnId: hostTurnIdSchema,
+          text: z.string(),
+        }),
+      ),
+    })
     .optional(),
   turnMappings: z.array(storedTurnMappingV1Schema),
   createdAt: isoDateSchema,
@@ -330,4 +347,12 @@ export interface ReplaceReadySessionAfterLastTurnInput {
   expectedNativeSessionRef: NativeSessionRef;
   nativeSessionRef: NativeSessionRef;
   turnMappings: StoredTurnMappingV1[];
+}
+
+export interface CommitThreadHandoffInput extends CreateProvisionalThreadInput {
+  expectedRevision: number | null;
+  nativeSessionRef: NativeSessionRef;
+  createdAt: string;
+  projectId?: string;
+  handoff: NonNullable<StoredThreadRecordV1["handoff"]>;
 }

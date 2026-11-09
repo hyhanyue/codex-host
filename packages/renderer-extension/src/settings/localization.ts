@@ -264,15 +264,8 @@ export interface RendererSettingsMessages {
   readonly updateSucceeded: string;
   readonly updateFailed: string;
   readonly updateRetry: string;
-  readonly updateManualNpmDescription: string;
-  readonly updateWindowsInstallerDescription: string;
   readonly updateManualTitle: string;
-  readonly updateManualFallbackDescription: string;
-  readonly updateCopyCommand: string;
-  readonly updateCommandCopied: string;
-  readonly updateCopyFailed: string;
   readonly updateDownloadFromReleases: string;
-  readonly updateDownloadWindowsInstaller: string;
   readonly updateStarCallout: string;
   readonly updateStarLink: string;
   readonly aboutTagline: string;
@@ -562,17 +555,8 @@ const ENGLISH_MESSAGES: RendererSettingsMessages = Object.freeze({
   updateSucceeded: "Update installed successfully.",
   updateFailed: "Update failed.",
   updateRetry: "Retry",
-  updateManualNpmDescription: "To update manually, quit codexhost and run this command:",
-  updateWindowsInstallerDescription:
-    "To update manually, download and run the installer for this system.",
   updateManualTitle: "Manual update",
-  updateManualFallbackDescription:
-    "The automatic update did not complete. Run this command in a terminal instead, then quit Codex and relaunch it with codexhost.",
-  updateCopyCommand: "Copy",
-  updateCommandCopied: "Copied",
-  updateCopyFailed: "Copy failed",
   updateDownloadFromReleases: "Download from GitHub Releases",
-  updateDownloadWindowsInstaller: "Download Windows installer",
   updateStarCallout:
     "If CodexHost has helped you, please Star it on GitHub. It means a lot to us 👉",
   updateStarLink: "GitHub",
@@ -859,17 +843,8 @@ const CHINESE_MESSAGES: RendererSettingsMessages = Object.freeze({
   updateSucceeded: "更新安装成功。",
   updateFailed: "更新失败。",
   updateRetry: "重试",
-  updateManualNpmDescription:
-    "如需手动更新，请在终端运行以下命令。更新完成后，请退出 Codex 并通过 codexhost 重新启动。",
-  updateWindowsInstallerDescription: "如需手动更新，请下载并运行适用于当前系统的安装包。",
   updateManualTitle: "手动更新",
-  updateManualFallbackDescription:
-    "自动更新未能完成，请改用下列命令在终端手动更新。完成后请退出 Codex 并通过 codexhost 重新启动。",
-  updateCopyCommand: "复制",
-  updateCommandCopied: "已复制",
-  updateCopyFailed: "复制失败",
   updateDownloadFromReleases: "前往 GitHub Releases 下载",
-  updateDownloadWindowsInstaller: "下载 Windows 安装包",
   updateStarCallout: "如果 CodexHost 帮到了你，请在 GitHub 点个 Star，这对我们意义重大 👉",
   updateStarLink: "GitHub",
   aboutTagline: "在 Codex Desktop 中运行 Pi 和其他 Harness",

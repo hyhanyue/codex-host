@@ -68,6 +68,7 @@ export const codexAccountUsageResultSchema = z
     accountCredits: accountCreditsSnapshotSchema.optional(),
     freshness: z.enum(["live", "cached"]),
     observedAt: z.string().datetime().nullable(),
+    refreshFailed: z.literal(true).optional(),
   })
   .strict();
 export type CodexAccountUsageResult = z.infer<typeof codexAccountUsageResultSchema>;

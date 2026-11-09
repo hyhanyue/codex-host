@@ -35,7 +35,7 @@ But **Codex** isn't the only great **Agent Harness** — **Claude Code** and **P
 </p>
 <br />
 
-<p align="center"><a href="https://github.com/BytePioneer-AI/codex-host/releases"><strong>Download</strong></a> · <a href="#web">Web &amp; Mobile</a> · <a href="#cross-agent-collaboration">Cross-Agent Collaboration</a> · <a href="#remote-harness">Remote</a> · <a href="#join-the-community">微信交流群</a> · <a href="docs/project/README.zh-CN.md">简体中文</a> · <a href="docs/project/README.ko.md">한국어</a></p>
+<p align="center"><a href="https://github.com/hyhanyue/codex-host/releases"><strong>Download</strong></a> · <a href="#web">Web &amp; Mobile</a> · <a href="#cross-agent-collaboration">Cross-Agent Collaboration</a> · <a href="#remote-harness">Remote</a> · <a href="#join-the-community">微信交流群</a> · <a href="docs/project/README.zh-CN.md">简体中文</a> · <a href="docs/project/README.ko.md">한국어</a></p>
 
 <br />
 
@@ -70,14 +70,18 @@ https://github.com/user-attachments/assets/c48192d7-23ff-4f6e-b61a-6345a655bb76
 
 **Option 1: npm** (macOS / Windows / Linux)
 
+Download both the platform and meta tarballs for the same version from [this fork’s Releases](https://github.com/hyhanyue/codex-host/releases), then substitute their actual filenames below. Installing `@codexhost/cli` from the public npm registry installs the upstream distribution.
+
 ```bash
-npm install -g @codexhost/cli
+npm install -g --offline --omit=optional --ignore-scripts ./codexhost-cli-<version>-<platform>.tgz ./codexhost-cli-<version>.tgz
 codexhost
 ```
 
+This fork maintains its custom Agent handoff, configured Composer delegation, and account quota controls on `main`. Built-in updates accept only published stable Releases from `hyhanyue/codex-host` whose actual tag commit belongs to `main` history. An empty Release list means no update. The Release must include both npm tarballs for npm installations.
+
 **Option 2: Installer** (macOS / Windows)
 
-Grab the installer for your platform from [Releases](https://github.com/BytePioneer-AI/codex-host/releases).
+Grab the installer for your platform from [Releases](https://github.com/hyhanyue/codex-host/releases).
 
 > Linux is supported on x64 and ARM64. See the [Linux guide](docs/platforms/linux/linux.md).
 
@@ -246,7 +250,7 @@ Before you start, add the remote machine in Codex Desktop under **Settings → C
 1. Install and start codexhost on the remote machine:
 
    ```bash
-   npm install -g @codexhost/cli
+   npm install -g --offline --omit=optional --ignore-scripts ./codexhost-cli-<version>-<platform>.tgz ./codexhost-cli-<version>.tgz
    codexhost remote install
    codexhost remote start
    codexhost remote status
@@ -311,7 +315,7 @@ Please read the [contributing guide](CONTRIBUTING.md) before opening an issue or
 Requirements: the official Codex Desktop, Node.js 22.19+ or 24, and Rust.
 
 ```bash
-git clone https://github.com/BytePioneer-AI/codex-host
+git clone https://github.com/hyhanyue/codex-host
 cd codex-host
 npm ci
 npm start

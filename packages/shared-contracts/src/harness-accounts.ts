@@ -57,10 +57,19 @@ export const harnessAccountInspectParamsSchema = z
   .strict();
 export type HarnessAccountInspectParams = z.infer<typeof harnessAccountInspectParamsSchema>;
 
+export const harnessAccountUnavailableReasonSchema = z.enum([
+  "unsupported",
+  "notInstalled",
+  "authenticationRequired",
+  "failed",
+]);
+export type HarnessAccountUnavailableReason = z.infer<typeof harnessAccountUnavailableReasonSchema>;
+
 export const harnessAccountInspectResultSchema = z
   .object({
     ...harnessAccountIdentityShape,
     account: harnessAccountSnapshotSchema.nullable(),
+    unavailableReason: harnessAccountUnavailableReasonSchema.optional(),
     /** Every Billing Source from one Harness; `account` remains the first for older clients. */
     accounts: z.array(harnessAccountSnapshotSchema).max(8).optional(),
   })

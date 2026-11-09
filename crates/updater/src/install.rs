@@ -4,16 +4,13 @@ use std::error::Error;
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 use std::fs;
 use std::fs::File;
-#[cfg(any(target_os = "windows", target_os = "macos"))]
 use std::io::Read;
-#[cfg(any(target_os = "windows", target_os = "macos"))]
 use std::path::Path;
 use std::process::Command;
 
 use codexhost_platform::configure_background_command;
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 use serde::Deserialize;
-#[cfg(any(target_os = "windows", target_os = "macos"))]
 use sha2::{Digest, Sha256};
 
 #[cfg(any(target_os = "windows", target_os = "macos"))]
@@ -24,7 +21,6 @@ use crate::request::{
 #[cfg(target_os = "macos")]
 use crate::status::unix_seconds;
 
-const NPM_PACKAGE_NAME: &str = "@codexhost/cli";
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 const DISTRIBUTION_FILE: &str = "codexhost-distribution.json";
 
@@ -38,7 +34,6 @@ struct DistributionMetadata {
     target: String,
 }
 
-#[cfg(any(target_os = "windows", target_os = "macos"))]
 fn sha256_file(path: &Path) -> Result<String, Box<dyn Error>> {
     let mut file = File::open(path)?;
     let mut hasher = Sha256::new();
@@ -57,7 +52,6 @@ fn sha256_file(path: &Path) -> Result<String, Box<dyn Error>> {
         .collect())
 }
 
-#[cfg(any(target_os = "windows", target_os = "macos"))]
 fn verify_artifact(path: &Path, expected: &str) -> Result<(), Box<dyn Error>> {
     let actual = sha256_file(path)?;
     if actual != expected {
@@ -103,6 +97,8 @@ fn run_checked(command: &mut Command, label: &str) -> Result<(), Box<dyn Error>>
 }
 
 fn install_npm(request: &UpdateRequest, npm: &NpmInstallation) -> Result<(), Box<dyn Error>> {
+    verify_artifact(&npm.meta_path, &npm.meta_sha256)?;
+    verify_artifact(&npm.platform_path, &npm.platform_sha256)?;
     // The installer runs this step itself for an EXE install. npm does not, so close
     // what still runs from the platform package (for example a Shim the stopped
     // Desktop left behind) before npm replaces those locked executables. The shared
@@ -112,8 +108,17 @@ fn install_npm(request: &UpdateRequest, npm: &NpmInstallation) -> Result<(), Box
     let mut command = Command::new(&npm.node_path);
     command
         .arg(&npm.npm_cli_path)
-        .args(["install", "--global", "--no-audit", "--no-fund"])
-        .arg(format!("{NPM_PACKAGE_NAME}@{}", request.version));
+        .args([
+            "install",
+            "--global",
+            "--offline",
+            "--omit=optional",
+            "--ignore-scripts",
+            "--no-audit",
+            "--no-fund",
+        ])
+        .arg(&npm.platform_path)
+        .arg(&npm.meta_path);
     configure_background_command(&mut command);
     if let Some(log) = operation_log(request, "npm-install.log") {
         command.stdout(log.try_clone()?).stderr(log);

@@ -3,6 +3,8 @@ import {
   type AccountCreditsSnapshot,
 } from "@codexhost/shared-contracts";
 
+import type { ComposerQuotaSources, ComposerQuotaView } from "./renderer-composer-quota.js";
+import { RendererMethodUnavailableError } from "./renderer-request-sender.js";
 import type { RendererSettingsLocale } from "./settings/localization.js";
 
 import {
@@ -23,6 +25,11 @@ export interface RendererCreditsControl {
   trigger: HTMLButtonElement;
   popover: HTMLDivElement;
   anchor: HTMLElement | null;
+  update(
+    credits: AccountCreditsSnapshot | null,
+    locale: RendererSettingsLocale,
+    sources?: ComposerQuotaSources,
+  ): boolean;
   dispose(): void;
   place(anchor: HTMLElement | null): boolean;
 }
@@ -83,6 +90,9 @@ export function formatRendererCreditsReset(
 ): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
+  if (/^\d{4}-\d{2}-\d{2}$/u.test(value)) {
+    return date.toLocaleDateString(locale, { month: "long", day: "numeric", timeZone: "UTC" });
+  }
   const isToday =
     date.getFullYear() === now.getFullYear() &&
     date.getMonth() === now.getMonth() &&
@@ -157,72 +167,17 @@ function resetLabel(
   return locale === "zh-CN" ? `${formatted} ${messages.resets}` : `${messages.resets} ${formatted}`;
 }
 
-function renderCreditsHeader(
-  credits: AccountCreditsSnapshot,
-  locale: RendererSettingsLocale,
-  messages: RendererCreditsMessages,
-): HTMLDivElement {
-  const wrapper = document.createElement("div");
-  wrapper.style.marginBottom = "11px";
-
-  const top = document.createElement("div");
-  top.style.display = "flex";
-  top.style.alignItems = "flex-start";
-  top.style.justifyContent = "space-between";
-  top.style.gap = "12px";
-  top.style.marginBottom = "5px";
-
-  // Same left-label / right-percent column order as each tile below, so the
-  // reset line always lands under its own label instead of zig-zagging sides.
-  const left = document.createElement("div");
-  const label = document.createElement("div");
-  label.textContent = productLabel(credits, locale);
-  label.style.fontSize = "12.5px";
-  label.style.fontWeight = "600";
-  left.append(label);
-  if (credits.resetsAt) {
-    const reset = document.createElement("div");
-    reset.textContent = resetLabel(credits.resetsAt, locale, messages);
-    reset.style.fontSize = "11px";
-    reset.style.color = "color-mix(in srgb, currentColor 62%, transparent)";
-    left.append(reset);
-  }
-
-  const color = toneColor(rendererCreditsTone(credits.usedPercent));
-  const remaining = remainingPercent(credits.usedPercent);
-  const percent = document.createElement("span");
-  percent.style.display = "inline-flex";
-  percent.style.alignItems = "baseline";
-  percent.style.gap = "4px";
-  percent.style.whiteSpace = "nowrap";
-  percent.style.color = color;
-  const remainingLabel = document.createElement("span");
-  remainingLabel.textContent = `${messages.remaining} `;
-  remainingLabel.style.fontSize = "11px";
-  remainingLabel.style.fontWeight = "600";
-  remainingLabel.style.opacity = "0.8";
-  const remainingValue = document.createElement("span");
-  remainingValue.textContent = formatRendererCreditsPercent(remaining);
-  remainingValue.style.fontSize = "26px";
-  remainingValue.style.fontWeight = "700";
-  remainingValue.style.fontVariantNumeric = "tabular-nums";
-  percent.append(remainingLabel, remainingValue);
-
-  top.append(left, percent);
-
-  wrapper.append(top, renderCreditsBar(remaining, color));
-  return wrapper;
-}
-
 function renderCreditsTile(
   label: string,
   usagePercent: number,
   locale: RendererSettingsLocale,
-  messages: RendererCreditsMessages,
-  resetsAt?: string,
+  amount: Pick<AccountCreditsSnapshot, "used" | "limit" | "unit" | "resetsAt">,
+  leading = false,
 ): HTMLDivElement {
+  const messages = rendererCreditsMessages(locale);
   const color = toneColor(rendererCreditsTone(usagePercent));
   const remaining = remainingPercent(usagePercent);
+  const hasCap = amount.limit !== 0;
 
   const tile = document.createElement("div");
   tile.style.marginBottom = "11px";
@@ -235,52 +190,94 @@ function renderCreditsTile(
   top.style.marginBottom = "5px";
 
   const left = document.createElement("div");
-  const name = document.createElement("span");
+  const name = document.createElement("div");
   name.textContent = label;
-  name.style.fontSize = "12px";
+  name.style.fontSize = leading ? "12.5px" : "12px";
+  if (leading) name.style.fontWeight = "600";
   left.append(name);
-  if (resetsAt) {
+  if (amount.resetsAt) {
     const reset = document.createElement("div");
-    reset.textContent = resetLabel(resetsAt, locale, messages);
-    reset.style.fontSize = "10.5px";
-    reset.style.color = "color-mix(in srgb, currentColor 62%, transparent)";
+    reset.textContent = resetLabel(amount.resetsAt, locale, messages);
+    reset.style.fontSize = "11px";
+    reset.style.opacity = "0.7";
     left.append(reset);
   }
 
   const percent = document.createElement("span");
-  percent.textContent = `${messages.remaining} ${formatRendererCreditsPercent(remaining)}`;
-  percent.style.fontSize = "12px";
-  percent.style.fontVariantNumeric = "tabular-nums";
+  percent.style.display = "inline-flex";
+  percent.style.alignItems = "baseline";
+  percent.style.gap = "4px";
+  percent.style.whiteSpace = "nowrap";
   percent.style.color = color;
+  if (leading) {
+    const caption = document.createElement("span");
+    caption.textContent = `${messages.remaining} `;
+    caption.style.fontSize = "11px";
+    caption.style.fontWeight = "600";
+    const value = document.createElement("span");
+    value.textContent = hasCap ? formatRendererCreditsPercent(remaining) : "—";
+    value.style.fontSize = "26px";
+    value.style.fontWeight = "700";
+    value.style.fontVariantNumeric = "tabular-nums";
+    percent.append(caption, value);
+  } else {
+    percent.textContent = `${messages.remaining} ${hasCap ? formatRendererCreditsPercent(remaining) : "—"}`;
+    percent.style.fontSize = "12px";
+    percent.style.fontVariantNumeric = "tabular-nums";
+  }
   top.append(left, percent);
-
-  tile.append(top, renderCreditsBar(remaining, color));
+  tile.append(top);
+  if (hasCap) tile.append(renderCreditsBar(remaining, color));
+  if (amount.used !== undefined && amount.limit !== undefined && amount.unit) {
+    const detail = document.createElement("div");
+    const available = Math.max(0, amount.limit - amount.used);
+    const format = new Intl.NumberFormat(locale, { maximumFractionDigits: 6 });
+    detail.textContent = `${format.format(available)} / ${format.format(amount.limit)} ${amount.unit}`;
+    detail.style.fontSize = "11px";
+    detail.style.marginTop = "4px";
+    tile.append(detail);
+  }
   return tile;
 }
 
 function renderDetails(
-  popover: HTMLDivElement,
+  content: HTMLElement,
   credits: AccountCreditsSnapshot,
   locale: RendererSettingsLocale,
 ): void {
-  const messages = rendererCreditsMessages(locale);
-  const glowColor = toneColor(rendererCreditsTone(credits.usedPercent));
-  popover.style.backgroundImage = `radial-gradient(160px 100px at 18% -10%, color-mix(in srgb, ${glowColor} 20%, transparent), transparent 70%)`;
-  popover.setAttribute("aria-label", messages.details);
-  popover.replaceChildren();
-  popover.append(renderCreditsHeader(credits, locale, messages));
-  const tiles = (credits.productUsage ?? []).map((product) =>
-    renderCreditsTile(
-      productLabel(product, locale),
-      product.usagePercent,
-      locale,
-      messages,
-      product.resetsAt,
+  const tiles = [
+    renderCreditsTile(productLabel(credits, locale), credits.usedPercent, locale, credits, true),
+    ...(credits.productUsage ?? []).map((product) =>
+      renderCreditsTile(productLabel(product, locale), product.usagePercent, locale, product),
     ),
-  );
+  ];
   const lastTile = tiles.at(-1);
   if (lastTile) lastTile.style.marginBottom = "0";
-  popover.append(...tiles);
+  content.append(...tiles);
+}
+
+const QUOTA_STATUS = {
+  loading: ["Loading limits…", "正在读取额度…"],
+  empty: ["No limit data available", "暂无额度数据"],
+  unsupported: ["Account limits are unavailable for this Agent", "此 Agent 未提供可读取的账户额度"],
+  notInstalled: ["The CLI is not installed", "CLI 未安装"],
+  authenticationRequired: ["Sign in to this Agent to see its limits", "请登录此 Agent 后查看额度"],
+  failed: ["Could not refresh limits", "额度刷新失败"],
+} as const;
+
+function quotaButton(text: string, label?: string): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = TRIGGER_CHIP_CLASS;
+  button.textContent = text;
+  if (label) {
+    button.title = label;
+    button.setAttribute("aria-label", label);
+  }
+  button.style.padding = "4px 6px";
+  button.style.fontSize = "11px";
+  button.style.whiteSpace = "nowrap";
+  return button;
 }
 
 function popoverIsOpen(popover: HTMLDivElement): boolean {
@@ -383,19 +380,187 @@ export function mountRendererCreditsControl(composerId: string): RendererCredits
   popover.style.width = "240px";
   popover.style.maxWidth = "min(280px, calc(100vw - 24px))";
   popover.style.padding = "10px 12px";
+  popover.style.maxHeight = "min(65vh, 440px)";
+  popover.style.overflow = "auto";
   applyRendererPopoverChrome(popover);
   popover.style.font = "13px/1.35 system-ui, sans-serif";
   popover.style.letterSpacing = "0";
   popover.style.zIndex = "2147483647";
   trigger.setAttribute("aria-controls", popover.id);
 
+  const navigation = document.createElement("div");
+  navigation.style.display = "flex";
+  navigation.style.flexWrap = "wrap";
+  navigation.style.gap = "3px";
+  navigation.style.marginBottom = "10px";
+  const content = document.createElement("div");
+  content.setAttribute("aria-live", "polite");
+  popover.append(navigation, content);
+
   let placementReference: Element | null = null;
+  let sources: ComposerQuotaSources | undefined;
+  let fallback: AccountCreditsSnapshot | null = null;
+  let locale: RendererSettingsLocale = "en";
+  let selected: string | undefined;
+  let views = new Map<string, ComposerQuotaView>();
+  let pending = new Set<string>();
+  let pinned = false;
+  let navKey = "";
+  let lastContent: readonly unknown[] = [];
+  let ringValue: number | null | undefined;
+
+  const currentSource = () => sources?.agents.find(({ id }) => id === sources?.current);
+  const selectedSource = () =>
+    sources?.agents.find(({ id }) => id === selected) ?? currentSource() ?? sources?.agents[0];
+
+  const paint = (): boolean => {
+    const current = currentSource();
+    const active = current && views.get(current.id);
+    const useFallback =
+      !current || (current.id !== "codex" && (!active || active.status === "loading"));
+    const credits = active?.status === "ready" ? active.credits : useFallback ? fallback : null;
+    const visible = Boolean((credits || sources?.agents.length) && control.anchor?.parentElement);
+    control.root.style.display = visible ? "inline-flex" : "none";
+    if (!visible) {
+      closePopover(control);
+      return false;
+    }
+
+    const remaining = credits && credits.limit !== 0 ? remainingPercent(credits.usedPercent) : null;
+    const percent = remaining === null ? "—" : formatRendererCreditsPercent(remaining);
+    const messages = rendererCreditsMessages(locale);
+    const title = credits ? `${productLabel(credits, locale)} ${percent}` : messages.account;
+    const description = current ? `${current.label} · ${title}` : title;
+    const tone = credits ? toneColor(rendererCreditsTone(credits.usedPercent)) : "currentColor";
+    if (ringValue !== remaining || ringSlot.dataset.tone !== tone) {
+      ringValue = remaining;
+      ringSlot.dataset.tone = tone;
+      ringSlot.replaceChildren(
+        createRendererUsageRing(remaining ?? 0, {
+          size: 14,
+          strokeWidth: 2.4,
+          color: remaining === null ? "transparent" : tone,
+        }),
+      );
+      label.textContent = remaining === null ? "—" : `${Math.round(remaining)}%`;
+    }
+    trigger.setAttribute("aria-label", description);
+    trigger.title = description;
+
+    const source = selectedSource();
+    const view = source ? views.get(source.id) : undefined;
+    const shown =
+      !source || source.id === current?.id
+        ? credits
+        : view?.status === "ready"
+          ? view.credits
+          : null;
+    const nextNavKey = JSON.stringify([locale, sources?.agents, source?.id, current?.id]);
+    if (navKey !== nextNavKey) {
+      navKey = nextNavKey;
+      navigation.replaceChildren();
+      navigation.hidden = !source;
+      navigation.style.display = source ? "flex" : "none";
+      if (source) {
+        for (const agent of sources?.agents ?? []) {
+          const button = quotaButton(agent.label);
+          button.dataset.codexhostQuotaAgent = agent.id;
+          button.setAttribute("aria-pressed", String(agent.id === source.id));
+          if (agent.id === source.id) button.style.fontWeight = "700";
+          button.addEventListener("click", () => {
+            selected = agent.id;
+            read(agent.id, false);
+            paint();
+            navigation
+              .querySelector<HTMLElement>(`[data-codexhost-quota-agent="${agent.id}"]`)
+              ?.focus();
+          });
+          navigation.append(button);
+        }
+        const refreshLabel = locale === "zh-CN" ? "刷新额度" : "Refresh limits";
+        const refresh = quotaButton("↻", refreshLabel);
+        refresh.style.marginLeft = "auto";
+        refresh.addEventListener("click", () => read(source.id, true));
+        navigation.append(refresh);
+      }
+    }
+    const nextContent = [source?.label, shown, view, locale];
+    if (nextContent.every((value, index) => value === lastContent[index])) return true;
+    lastContent = nextContent;
+    popover.setAttribute(
+      "aria-label",
+      source ? `${source.label} · ${messages.details}` : messages.details,
+    );
+    const glow = shown && toneColor(rendererCreditsTone(shown.usedPercent));
+    popover.style.backgroundImage = glow
+      ? `radial-gradient(160px 100px at 18% -10%, color-mix(in srgb, ${glow} 20%, transparent), transparent 70%)`
+      : "none";
+    content.replaceChildren();
+    if (shown) {
+      if (view?.status === "ready" && view.plan) {
+        const plan = document.createElement("div");
+        plan.style.fontSize = "11px";
+        plan.style.opacity = "0.7";
+        plan.textContent = view.plan;
+        content.append(plan);
+      }
+      renderDetails(content, shown, locale);
+    } else if (source) {
+      content.textContent =
+        QUOTA_STATUS[view?.status === "ready" ? "empty" : (view?.status ?? "loading")][
+          locale === "zh-CN" ? 1 : 0
+        ];
+    }
+    return true;
+  };
+
+  function read(id: string, refresh: boolean): void {
+    const config = sources;
+    if (!config || !config.agents.some((agent) => agent.id === id) || pending.has(id)) return;
+    const requests = pending;
+    requests.add(id);
+    if (refresh || !views.has(id)) {
+      views.set(id, { status: "loading" });
+      paint();
+    }
+    void Promise.resolve()
+      .then(() => config.read(id, refresh))
+      .catch((error: unknown): ComposerQuotaView => ({
+        status: error instanceof RendererMethodUnavailableError ? "unsupported" : "failed",
+      }))
+      .then((view) => {
+        requests.delete(id);
+        if (pending !== requests) return;
+        views.set(id, view);
+        paint();
+      });
+  }
+
   const control: RendererCreditsControl = {
     root,
     trigger,
     popover,
     anchor: null,
+    update(credits, nextLocale, nextSources) {
+      fallback = credits;
+      locale = nextLocale;
+      const reset =
+        sources?.client !== nextSources?.client || sources?.accountKey !== nextSources?.accountKey;
+      const changedAgent = sources?.current !== nextSources?.current;
+      const previousCurrent = currentSource()?.id;
+      sources = nextSources;
+      if (reset) {
+        views = new Map();
+        pending = new Set();
+      }
+      if (reset || changedAgent) selected = undefined;
+      const current = currentSource();
+      if (current && (reset || current.id !== previousCurrent)) read(current.id, false);
+      return paint();
+    },
     dispose() {
+      sources = undefined;
+      pending = new Set();
       closePopover(control);
       if (closeTimer !== null) window.clearTimeout(closeTimer);
       root.remove();
@@ -436,25 +601,53 @@ export function mountRendererCreditsControl(composerId: string): RendererCredits
     cancelClose();
     closeTimer = window.setTimeout(() => {
       closeTimer = null;
-      if (!trigger.matches(":hover") && !popover.matches(":hover")) closePopover(control);
+      if (
+        !pinned &&
+        !trigger.matches(":hover") &&
+        !popover.matches(":hover") &&
+        !popover.contains(document.activeElement)
+      )
+        closePopover(control);
     }, 140);
   };
 
-  trigger.addEventListener("click", () => togglePopover(control));
+  const reveal = () => {
+    if (trigger.getAttribute("aria-expanded") !== "true") {
+      selected = undefined;
+      const source = selectedSource();
+      if (source) read(source.id, false);
+      paint();
+    }
+    openPopover(control);
+  };
+  trigger.addEventListener("click", () => {
+    if (!sources) {
+      togglePopover(control);
+    } else if (pinned) {
+      pinned = false;
+      closePopover(control);
+    } else {
+      pinned = true;
+      reveal();
+    }
+  });
   trigger.addEventListener("pointerenter", () => {
     cancelClose();
-    openPopover(control);
+    reveal();
   });
   trigger.addEventListener("pointerleave", scheduleClose);
   trigger.addEventListener("focus", () => {
     cancelClose();
-    openPopover(control);
+    reveal();
   });
   trigger.addEventListener("blur", scheduleClose);
   popover.addEventListener("pointerenter", cancelClose);
   popover.addEventListener("pointerleave", scheduleClose);
+  popover.addEventListener("focusout", scheduleClose);
   popover.addEventListener("toggle", () => {
-    trigger.setAttribute("aria-expanded", String(popoverIsOpen(popover)));
+    const open = popoverIsOpen(popover);
+    if (!open) pinned = false;
+    trigger.setAttribute("aria-expanded", String(open));
   });
   root.append(trigger);
   document.body.append(popover);
@@ -465,34 +658,7 @@ export function renderRendererCreditsControl(
   control: RendererCreditsControl,
   accountCredits: AccountCreditsSnapshot | null,
   locale: RendererSettingsLocale = "en",
+  sources?: ComposerQuotaSources,
 ): boolean {
-  if (accountCredits === null || !control.anchor?.parentElement) {
-    control.root.style.display = "none";
-    closePopover(control);
-    return false;
-  }
-  const remaining = remainingPercent(accountCredits.usedPercent);
-  const percent = formatRendererCreditsPercent(remaining);
-  const periodLabel = accountCredits.label
-    ? productLabel(accountCredits, locale)
-    : creditsPeriodLabel(accountCredits.periodType, locale);
-  const title = `${periodLabel} ${percent}`;
-  const tone = rendererCreditsTone(accountCredits.usedPercent);
-  const ringSlot = control.trigger.querySelector<HTMLElement>("[data-codexhost-credits-ring]");
-  const label = control.trigger.querySelector<HTMLElement>("[data-codexhost-credits-label]");
-  if (ringSlot) {
-    ringSlot.replaceChildren(
-      createRendererUsageRing(remaining, {
-        size: 14,
-        strokeWidth: 2.4,
-        color: toneColor(tone),
-      }),
-    );
-  }
-  if (label) label.textContent = `${Math.round(remaining)}%`;
-  control.root.style.display = "inline-flex";
-  control.trigger.setAttribute("aria-label", title);
-  control.trigger.title = title;
-  renderDetails(control.popover, accountCredits, locale);
-  return true;
+  return control.update(accountCredits, locale, sources);
 }
