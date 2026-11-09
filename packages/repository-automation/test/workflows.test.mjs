@@ -45,6 +45,12 @@ describe("workflow and form contracts", () => {
       "node scripts/release/smoke-npm-package.mjs --target macos-arm64",
     ])
       expect(workflow).toContain(command);
+    const typecheck = workflow.slice(
+      workflow.indexOf("      - name: Typecheck"),
+      workflow.indexOf("      - name: Test TypeScript"),
+    );
+    expect(typecheck).toContain("NODE_OPTIONS: --max-old-space-size=4096");
+    expect(workflow.match(/NODE_OPTIONS:/gu)).toHaveLength(1);
     expect(workflow).not.toMatch(/runner\.os|ubuntu|windows|check-linux/u);
   });
 

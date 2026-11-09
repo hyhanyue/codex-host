@@ -65,6 +65,8 @@ macOS CI 保留以下检查，不以缩减平台为由跳过原来由 Linux 承�
 - 独立 Host 生命周期、Rust Clippy、编译和测试。
 - macOS ARM64 npm 安装包 smoke，核对安装、可执行文件权限和版本。
 
+完整测试项目的类型检查超过 macOS runner 上 Node 默认的 2 GiB 堆限制，因此仅 `Typecheck` step 设置 `NODE_OPTIONS=--max-old-space-size=4096`。不缩减类型检查范围，也不改变其他 step 或本地默认值。
+
 CI 不设置 `CODEXHOST_TEST_SCOPE=platform` 或测试排除参数；该筛选仍可用于本地定向检查。Windows 和 Linux 的实现与本地工具不删除，但后续 CI 不再提供这两个平台的验证证据。macOS Intel 安装包仍由发布工作流在 `macos-15-intel` 上构建。
 
 仅修改 `docs/**` 或 Markdown 文件的 PR 不触发 CI；没有新的 CI 运行时，维护自动化不会发布新的通过评论。`main push` 不做路径过滤，继续为确切发布 SHA 提供证据。不新增或修改分支保护。

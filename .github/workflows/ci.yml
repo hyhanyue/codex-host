@@ -63,6 +63,9 @@ jobs:
         run: npm run lint
 
       - name: Typecheck
+        # The complete test project exceeds Node's default 2 GiB heap on macOS.
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
         run: npm run typecheck
 
       - name: Test TypeScript (full suite)
