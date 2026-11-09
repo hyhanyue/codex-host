@@ -42,6 +42,7 @@ import {
   type ThreadSendResult,
   type ThreadWaitInput,
 } from "./delegation-types.js";
+import { originClientName } from "./external-client-origin.js";
 import { projectDelegationThreadSnapshot, validateReadOptions } from "./delegation-snapshot.js";
 import {
   createExternalThreadRecordInput,
@@ -243,6 +244,12 @@ export class HarnessDelegationCoordinator {
     { interactive = false }: { interactive?: boolean } = {},
   ): Promise<DelegationStartResult> {
     validateStart(input);
+    // An external client has no workspace of its own for the child to inherit.
+    if (originClientName(input.parentThreadId) && !input.cwd)
+      throw new DelegationControlError(
+        "INVALID_ARGUMENT",
+        "--cwd is required when an external client starts work without a parent Thread",
+      );
     const parentThreadId = await this.#resolveParent(input.parentThreadId);
     const parent = await this.#parentMetadata(parentThreadId);
     if (interactive && !parent.cwd && !input.cwd) {
@@ -258,7 +265,12 @@ export class HarnessDelegationCoordinator {
         title,
         ...(interactive ? { interactive } : {}),
       });
-      return { ...result, parentThreadId, cwd: result.cwd ?? selectedCwd };
+      return {
+        ...result,
+        parentThreadId,
+        cwd: result.cwd ?? selectedCwd,
+        title: result.title ?? title,
+      };
     }
     const startInput = { ...input, parentThreadId, cwd: path.resolve(selectedCwd) };
     const targetHarnessId = input.harnessId as ExternalHarnessId;
@@ -302,6 +314,7 @@ export class HarnessDelegationCoordinator {
         started.configuration,
       ),
       cwd: started.cwd,
+      title: started.title,
       parentThreadId,
     };
   }
@@ -476,6 +489,7 @@ export class HarnessDelegationCoordinator {
                 : {}),
             },
           },
+          title: record.title,
         };
       } catch (error) {
         if (session) await session.close().catch(() => undefined);
@@ -768,6 +782,10 @@ export class HarnessDelegationCoordinator {
   async #parentMetadata(
     parentThreadId: string,
   ): Promise<ParentMetadata & { harnessId: RoutedHarnessId }> {
+    // A client origin is no Thread: the stored source Harness keeps the native default, and
+    // the client's name stands in for a parent title, so titles read "<subtask> · <client>".
+    const client = originClientName(parentThreadId);
+    if (client) return { harnessId: "codex", title: client };
     const record = await this.#repository.find(parentThreadId);
     if (record)
       return {
@@ -790,7 +808,7 @@ export class HarnessDelegationCoordinator {
         delegation.targetHarnessId as RoutedHarnessId,
         delegation.status,
       ),
-      ...(record ? { cwd: record.cwd } : {}),
+      ...(record ? { cwd: record.cwd, title: record.title } : {}),
       parentThreadId: delegation.parentHostThreadId,
     };
   }
