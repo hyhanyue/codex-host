@@ -1,3 +1,4 @@
+# Temporary verification only; never merge this workflow into main.
 name: Verify upstream sync on macOS
 
 on:
