@@ -88,3 +88,19 @@ jobs:
         run: |
           npm run build:typescript
           node scripts/release/smoke-npm-package.mjs --target macos-arm64 --version 0.1.6-ci.0
+
+      - name: Install Chromium for browser regression tests
+        run: npx playwright install chromium
+
+      - name: Build Web UI for browser regression tests
+        run: npm run build:web:ui
+
+      - name: Test upstream session controller
+        run: npm run test --workspace=@deepseek-ai/dsh-api-session-controller
+
+      - name: Test upstream browser regressions
+        run: >
+          node --import tsx --test
+          packages/web-server/test/browser/ch-core-navigation.test.ts
+          packages/web-server/test/browser/ch-mobile-connection.test.ts
+          packages/web-server/test/browser/ch-progressive-loading.test.ts
