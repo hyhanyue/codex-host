@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -6,7 +5,7 @@ import { PassThrough } from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { FakeHarnessAdapter } from "@codexhost/harness-adapter/testing";
 import { MappingStore } from "@codexhost/mapping-store";
-import { COMPOSER_DELEGATE_METHOD, harnessIdSchema } from "@codexhost/shared-contracts";
+import { harnessIdSchema } from "@codexhost/shared-contracts";
 import type { JsonObject } from "@codexhost/protocol-core";
 import { AppServerHost } from "../src/app-server-host.js";
 import { SharedThreadOwner } from "../src/shared-thread-owner.js";
@@ -99,28 +98,6 @@ async function rpc(
 }
 
 describe("shared external Threads", () => {
-  it("starts configured external drafts once on the shared owner", async () => {
-    const { front, open, adapter } = setup();
-    const desktop = front(true);
-    await desktop.ready;
-    const input = {
-      cwd: "/synthetic",
-      harnessId: "pi",
-      requestId: randomUUID(),
-      text: "Run on the independent owner.",
-    };
-    const [first, retry] = await Promise.all([
-      rpc(desktop, 51, COMPOSER_DELEGATE_METHOD, input),
-      rpc(desktop, 52, COMPOSER_DELEGATE_METHOD, input),
-    ]);
-    expect(first).not.toHaveProperty("error");
-    expect(first.result).toEqual(retry.result);
-    expect(open).toHaveBeenCalledTimes(1);
-    expect(await desktop.mappingStore.listThreads()).toEqual([]);
-    session(adapter).succeedTurn();
-    await desktop.collector.waitFor((m) => m.method === "turn/completed");
-  });
-
   it.each(["submit", "discard"])(
     "keeps SSH prewarms out of every viewer's history until used (%s)",
     async (action) => {

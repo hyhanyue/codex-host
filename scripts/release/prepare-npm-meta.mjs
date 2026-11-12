@@ -13,16 +13,13 @@ import {
   resolveNpmPackageVersion,
 } from "./prepare-npm.mjs";
 
-import { releaseTarget, resolveReleaseTargets } from "./targets.mjs";
-
 const repositoryRoot = path.resolve(import.meta.dirname, "../..");
 
 export function expectedNpmMetaPackagePaths() {
   return ["README.md", "bin/codexhost.js", "package.json"];
 }
 
-export function createNpmMetaPackageManifest({ version, targets }) {
-  const selected = resolveReleaseTargets(targets).map(releaseTarget);
+export function createNpmMetaPackageManifest({ version }) {
   return {
     name: NPM_PACKAGE_NAME,
     version,
@@ -31,18 +28,8 @@ export function createNpmMetaPackageManifest({ version, targets }) {
     bin: { codexhost: "bin/codexhost.js" },
     files: ["bin/**", "README.md"],
     engines: { node: NPM_NODE_ENGINE },
-    ...(targets === undefined
-      ? {}
-      : {
-          os: [...new Set(selected.map((target) => target.hostPlatform))],
-          cpu: [
-            ...new Set(
-              selected.map((target) => target.packageArchitecture ?? target.installerArchitecture),
-            ),
-          ],
-        }),
     optionalDependencies: Object.fromEntries(
-      resolveReleaseTargets(targets).map((target) => [NPM_PLATFORM_PACKAGE_NAMES[target], version]),
+      Object.values(NPM_PLATFORM_PACKAGE_NAMES).map((packageName) => [packageName, version]),
     ),
     keywords: ["codex", "codexhost", "pi", "claude-code", "agent", "harness"],
     repository: {
@@ -55,7 +42,7 @@ export function createNpmMetaPackageManifest({ version, targets }) {
   };
 }
 
-export function createNpmMetaReadme({ version, targets }) {
+export function createNpmMetaReadme({ version }) {
   return `# ${NPM_PACKAGE_NAME}
 
 ${NPM_PACKAGE_DESCRIPTION}
@@ -66,7 +53,7 @@ ${NPM_PACKAGE_DESCRIPTION}
 npm install -g ${NPM_PACKAGE_NAME}@${version}
 \`\`\`
 
-This version includes platform packages for ${resolveReleaseTargets(targets).join(", ")}. npm automatically installs the matching platform package. ${NPM_NODE_REQUIREMENT} is required. Official ChatGPT/Codex Desktop is only required for the Desktop interface; Web is included and works without it.
+npm automatically installs the matching macOS, Windows, or Linux platform package. ${NPM_NODE_REQUIREMENT} is required. Official ChatGPT/Codex Desktop is only required for the Desktop interface; Web is included and works without it.
 
 ## Usage
 
@@ -133,7 +120,7 @@ async function walkFiles(root, current = root) {
   return files;
 }
 
-export async function validateNpmMetaPackage({ packageRoot, targets }) {
+export async function validateNpmMetaPackage({ packageRoot }) {
   const expected = expectedNpmMetaPackagePaths().sort();
   const actual = (await walkFiles(packageRoot)).sort();
   if (expected.join("\n") !== actual.join("\n")) {
@@ -147,16 +134,13 @@ export async function validateNpmMetaPackage({ packageRoot, targets }) {
   if (manifest.bin?.codexhost !== "bin/codexhost.js") {
     throw new Error("npm meta package must expose bin/codexhost.js");
   }
-  const expectedManifest = createNpmMetaPackageManifest({ version: manifest.version, targets });
-  for (const field of ["os", "cpu", "optionalDependencies"]) {
-    if (JSON.stringify(manifest[field]) !== JSON.stringify(expectedManifest[field])) {
-      throw new Error(`npm meta package ${field} must match the selected release targets`);
-    }
+  if (manifest.os !== undefined || manifest.cpu !== undefined) {
+    throw new Error("npm meta package must be architecture-neutral");
   }
   return actual;
 }
 
-export async function prepareNpmMetaPackage({ version, targets, root = repositoryRoot }) {
+export async function prepareNpmMetaPackage({ version, root = repositoryRoot }) {
   const packageVersion = await resolveNpmPackageVersion(root, version);
   const outputRoot = path.join(root, "build", "npm", packageVersion, "meta");
   const packageRoot = path.join(outputRoot, "package");
@@ -170,13 +154,13 @@ export async function prepareNpmMetaPackage({ version, targets, root = repositor
   await chmod(path.join(packageRoot, "bin", "codexhost.js"), 0o755);
   await writeFile(
     path.join(packageRoot, "package.json"),
-    `${JSON.stringify(createNpmMetaPackageManifest({ version: packageVersion, targets }), null, 2)}\n`,
+    `${JSON.stringify(createNpmMetaPackageManifest({ version: packageVersion }), null, 2)}\n`,
   );
   await writeFile(
     path.join(packageRoot, "README.md"),
-    createNpmMetaReadme({ version: packageVersion, targets }),
+    createNpmMetaReadme({ version: packageVersion }),
   );
-  await validateNpmMetaPackage({ packageRoot, targets });
+  await validateNpmMetaPackage({ packageRoot });
   return { outputRoot, packageRoot, version: packageVersion };
 }
 
@@ -197,27 +181,17 @@ export async function packNpmMetaPackage({ outputRoot, packageRoot, version }) {
 export async function runNpmMetaReleaseCli(arguments_) {
   let version;
   let pack = false;
-  let targets;
   for (let index = 0; index < arguments_.length; index += 1) {
     const argument = arguments_[index];
     if (argument === "--pack") pack = true;
-    else if (argument === "--targets") {
-      if (targets !== undefined) throw new Error("--targets may only be provided once");
-      if (!arguments_[index + 1]) throw new Error("--targets requires a value");
-      targets = resolveReleaseTargets(arguments_[++index]);
-    } else if (argument.startsWith("--targets=")) {
-      if (targets !== undefined) throw new Error("--targets may only be provided once");
-      targets = resolveReleaseTargets(argument.slice("--targets=".length));
-    } else if (argument === "--version") version = arguments_[++index];
+    else if (argument === "--version") version = arguments_[++index];
     else if (argument.startsWith("--version=")) version = argument.slice("--version=".length);
     else if (argument === "--help" || argument === "-h") {
-      console.log(
-        "usage: npm run release:npm:meta -- --version <semver> [--pack] [--targets <target,target,...>]",
-      );
+      console.log("usage: npm run release:npm:meta -- --version <semver> [--pack]");
       return;
     } else throw new Error(`unknown npm meta release option: ${argument}`);
   }
-  const prepared = await prepareNpmMetaPackage({ version, targets });
+  const prepared = await prepareNpmMetaPackage({ version });
   console.log(`package=${prepared.packageRoot}`);
   console.log(`version=${prepared.version}`);
   if (pack) {

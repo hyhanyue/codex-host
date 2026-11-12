@@ -49,34 +49,6 @@ describe("Account quota cache", () => {
     expect(cache.get("b")?.planFiveHourUsedPercent).toBe(80);
   });
 
-  it("keeps only the windows returned by the latest successful account read", async () => {
-    const cache = new AccountRateLimits();
-    await cache.refresh("a", async () => response(20));
-    await cache.refresh(
-      "a",
-      async () => ({
-        rateLimits: {
-          primary: { usedPercent: 43, windowDurationMins: 10_080, resetsAt: 1_794_386_706 },
-          secondary: { usedPercent: 10, windowDurationMins: 720 },
-        },
-      }),
-      true,
-    );
-    expect(cache.get("a")?.planFiveHourUsedPercent).toBeUndefined();
-    expect(cache.getCredits("a")).toEqual({
-      usedPercent: 43,
-      periodType: "seven_day",
-      resetsAt: "2026-11-11T08:45:06.000Z",
-      productUsage: [{ product: "12-hour window", usagePercent: 10, periodType: "unknown" }],
-    });
-    await expect(cache.refresh("a", async () => ({ rateLimits: {} }), true)).resolves.toMatchObject(
-      {
-        status: "empty",
-      },
-    );
-    expect(cache.getCredits("a")).toBeNull();
-  });
-
   it("keeps reset-card inventory on the same Account snapshot as quota windows", async () => {
     const cache = new AccountRateLimits();
     await cache.refresh("a", async () => ({

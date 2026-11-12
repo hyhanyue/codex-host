@@ -93,14 +93,6 @@ function downloader(bytes: Buffer) {
   };
 }
 
-const npmBytes = Buffer.from("npm tarball fixture");
-const npmArtifact = {
-  url: "https://example.test/npm.tgz",
-  sha256: sha256(npmBytes),
-  size: npmBytes.length,
-};
-const npmArtifacts = { metaArtifact: npmArtifact, platformArtifact: npmArtifact };
-
 describe("background update manager", () => {
   it("prepares and starts an exact npm update request", async () => {
     const root = await temporaryDirectory();
@@ -117,7 +109,6 @@ describe("background update manager", () => {
     const manager = createBackgroundUpdateManager({
       platform: "darwin",
       randomId: () => "npm-fixture",
-      download: downloader(npmBytes),
       now: () => 1_700_000_000_000,
       spawnUpdater: (executable, requestPath) => {
         const child = spawn(process.execPath, [
@@ -155,7 +146,6 @@ describe("background update manager", () => {
     const prepared = await manager.prepareNpm({
       ...common,
       ...npmFiles,
-      ...npmArtifacts,
       packageRoot: path.join(root, "npm", "platform-package"),
     });
     expect(prepared).toMatchObject({
@@ -177,10 +167,6 @@ describe("background update manager", () => {
         npm_cli_path: npmFiles.npmCliPath,
         npm_launcher_path: npmFiles.npmLauncherPath,
         npm_package_root: path.join(root, "npm", "platform-package"),
-        meta_path: path.join(path.dirname(prepared.requestPath), "meta.tgz"),
-        meta_sha256: npmArtifact.sha256,
-        platform_path: path.join(path.dirname(prepared.requestPath), "platform.tgz"),
-        platform_sha256: npmArtifact.sha256,
       },
     });
     await expect(manager.readStatus(prepared.statusPath)).resolves.toEqual({
@@ -217,18 +203,16 @@ describe("background update manager", () => {
       const manager = createBackgroundUpdateManager({
         platform: "darwin",
         randomId: () => "retry-fixture",
-        download: downloader(npmBytes),
       });
 
       await expect(
         manager.prepareNpm({
           ...common,
           ...npmFiles,
-          ...npmArtifacts,
           packageRoot: path.join(root, "npm", "platform-package"),
         }),
       ).resolves.toMatchObject({ installation: "npm" });
-      expect(renameFixture.attempts).toBeGreaterThanOrEqual(3);
+      expect(renameFixture.attempts).toBe(3);
     },
   );
 

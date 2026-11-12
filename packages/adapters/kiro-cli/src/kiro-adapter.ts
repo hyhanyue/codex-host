@@ -81,7 +81,6 @@ import {
 } from "./kiro-slash-commands.js";
 import { KiroTurnOutput } from "./turn-output.js";
 import { KiroUsage } from "./usage.js";
-import { readKiroAccountUsage } from "./account-usage.js";
 import {
   findForkBoundary,
   findRollbackBoundary,
@@ -194,13 +193,6 @@ export class KiroAdapter implements HarnessAdapter {
     this.#options = options;
     this.#deps = deps;
     this.sessionImport = new KiroSessionImport({ ...process.env, ...options.environment });
-  }
-
-  inspectAccount() {
-    return readKiroAccountUsage({
-      ...(this.#options.command ? { command: this.#options.command } : {}),
-      ...(this.#options.environment ? { environment: this.#options.environment } : {}),
-    });
   }
 
   async inspect(input: InspectHarnessInput = {}): Promise<HarnessInspection> {

@@ -34,7 +34,6 @@ function nativeFixture() {
     email: "current@example.com",
     planType: "pro",
   };
-  let pausedAccountRead: Promise<void> | undefined;
   const connect = vi.fn(async () => {
     const stdin = new PassThrough();
     const stdout = new PassThrough();
@@ -58,13 +57,6 @@ function nativeFixture() {
           if (!initialized) throw new Error("Unexpected or uninitialized native request");
           if (request.method === "account/read") {
             result = { account, requiresOpenaiAuth: true };
-            const paused = pausedAccountRead;
-            pausedAccountRead = undefined;
-            if (paused) {
-              const frame = JSON.stringify({ id: request.id, result });
-              void paused.then(() => stdout.write(`${frame}\n`));
-              continue;
-            }
           } else if (request.method === "thread/start" || request.method === "thread/resume") {
             result = { thread: { id: "voice-thread" } };
           } else if (request.method === "thread/realtime/start") {
@@ -105,11 +97,6 @@ function nativeFixture() {
     crash: () => exit.resolve({ code: 1, signal: null }),
     signOut: () => {
       account = null;
-    },
-    pauseNextAccountRead() {
-      const paused = Promise.withResolvers<undefined>();
-      pausedAccountRead = paused.promise;
-      return () => paused.resolve(undefined);
     },
   };
 }
@@ -346,8 +333,7 @@ describe("local Codex read-only identity startup", () => {
       await expect(
         desktop.request("thread/realtime/start", { threadId: "voice-thread" }),
       ).resolves.toMatchObject({ result: {} });
-      const methods = replacement.requests.map((request) => request.method);
-      expect(methods.filter((method) => method !== "account/read")).toEqual([
+      expect(replacement.requests.map((request) => request.method)).toEqual([
         "initialize",
         "initialized",
         "initialize",
@@ -355,7 +341,6 @@ describe("local Codex read-only identity startup", () => {
         "thread/resume",
         "thread/realtime/start",
       ]);
-      expect(methods.filter((method) => method === "account/read")).toHaveLength(1);
       expect(await local.accountControl.refresh?.()).toMatchObject({ phase: "ready" });
     } finally {
       await desktop.close();
@@ -414,28 +399,5 @@ describe("local Codex read-only identity startup", () => {
       ),
     ).toBe(true);
     expect(f.connect).toHaveBeenCalledOnce();
-  });
-
-  it("does not restore a late identity read across a native auth change", async () => {
-    const f = nativeFixture();
-    const { accountControl } = await startLocal();
-    const original = await accountControl.refresh?.();
-    const reads = () => f.requests.filter(({ method }) => method === "account/read").length;
-    const count = reads();
-    const resume = f.pauseNextAccountRead();
-    const pending = accountControl.refresh?.();
-    try {
-      await vi.waitFor(() => expect(reads()).toBe(count + 1));
-      f.signOut();
-      accountControl.invalidate?.();
-      expect(accountControl.snapshot()).toMatchObject({ currentAccountId: null });
-      const signedOut = await accountControl.refresh?.();
-      expect(signedOut?.revision).toBeGreaterThan(original?.revision ?? 0);
-      resume();
-      expect(await pending).toEqual(signedOut);
-      expect(accountControl.snapshot()).toEqual(signedOut);
-    } finally {
-      resume();
-    }
   });
 });

@@ -2966,28 +2966,6 @@ describe("Pi HarnessAdapter Session", () => {
     await session.close();
   });
 
-  it("rejects an exact first-Turn selection that Pi would otherwise correct", async () => {
-    const { adapter, transports } = fixture();
-    await adapter.inspect({ cwd: "/synthetic" });
-    const opened = await adapter.open({
-      kind: "create",
-      cwd: "/synthetic",
-      model: encodePiModelRef({ provider: "synthetic-provider", id: "alternate-model" }),
-      thinkingOptionId: harnessThinkingOptionIdSchema.parse("xhigh"),
-      requireExactConfiguration: true,
-    });
-    if (!opened.ok) throw new Error(opened.error.message);
-    try {
-      await expect(opened.value.execute(textTurn("selected-thinking"))).resolves.toMatchObject({
-        ok: false,
-        error: { message: "Pi did not activate the requested Thinking level" },
-      });
-      expect(transports[1]?.runTurn).not.toHaveBeenCalled();
-    } finally {
-      await opened.value.close();
-    }
-  });
-
   it("applies create Thinking and publishes Pi-corrected readback before the first Turn", async () => {
     const { adapter, transports } = fixture();
     await expect(adapter.inspect({ cwd: "/synthetic" })).resolves.toMatchObject({

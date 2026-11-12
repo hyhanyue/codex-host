@@ -14,12 +14,12 @@ export {
   type InstalledUpdateContext,
 } from "./distribution.js";
 export {
+  CODEXHOST_LATEST_RELEASE_URL,
   compareSemanticVersions,
   expectedInstallerAssetName,
   fetchLatestGitHubRelease,
   parseLatestGitHubRelease,
   selectInstallerReleaseArtifact,
-  selectNpmReleaseArtifacts,
   type CodexhostLatestRelease,
   type CodexhostReleaseAsset,
   type GitHubReleaseFetchOptions,

@@ -43,10 +43,9 @@ describe("short terminal CI comments", () => {
   });
   it("quotes a failed job's raw error, without translating or breaking fences", () => {
     const state = ci({ conclusion: "failure" });
-    state.jobs[0] = {
-      ...state.jobs[0],
+    state.jobs[2] = {
+      ...state.jobs[2],
       id: 3,
-      name: "Check windows-latest",
       conclusion: "failure",
       html_url: "https://github.com/example/codex-host/actions/runs/42/job/3",
     };
@@ -61,7 +60,7 @@ describe("short terminal CI comments", () => {
   });
   it("labels a failed macOS matrix job with its platform name", () => {
     const state = ci({ conclusion: "failure" });
-    state.jobs[0].conclusion = "failure";
+    state.jobs[1].conclusion = "failure";
     expect(render(state)).toContain("❌ macOS CI 失败。");
   });
   it("edits only the authenticated bot's own marker, including old summaries", () => {

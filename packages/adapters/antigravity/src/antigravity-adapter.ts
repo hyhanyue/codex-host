@@ -10,8 +10,6 @@ import type { Readable, Writable } from "node:stream";
 import {
   unsupportedSteer,
   HarnessOutputChannel,
-  HarnessAccountInspectionError,
-  parseHarnessAccountCredits,
   sanitizeDiagnosticTail,
   type HarnessAdapter,
   type HarnessError,
@@ -1893,8 +1891,16 @@ export class AntigravityAdapter implements HarnessAdapter {
     // to the last quota observation when authentication has changed or failed.
     const snapshot = await this.refreshCredits();
     if (!snapshot) return null;
-    const credits = parseHarnessAccountCredits(snapshot);
-    return credits ? { credits } : null;
+    return {
+      credits: {
+        ...(snapshot.label ? { label: snapshot.label } : {}),
+        ...(snapshot.scope ? { scope: snapshot.scope } : {}),
+        usedPercent: snapshot.usedPercent,
+        periodType: snapshot.periodType,
+        ...(snapshot.resetsAt ? { resetsAt: snapshot.resetsAt } : {}),
+        ...(snapshot.productUsage ? { productUsage: [...snapshot.productUsage] } : {}),
+      },
+    };
   }
 
   /** Public account telemetry cache; never attributes quota to historical Thread spend. */
@@ -1904,15 +1910,9 @@ export class AntigravityAdapter implements HarnessAdapter {
 
   refreshCredits(): Promise<AntigravityQuotaSnapshot | null> {
     if (this.#quotaRefresh) return this.#quotaRefresh;
-    this.#quotaRefresh = this.#loadQuota()
-      .then((snapshot) => (this.#quota = snapshot))
-      .catch((error: unknown) => {
-        this.#quota = null;
-        throw error;
-      })
-      .finally(() => {
-        this.#quotaRefresh = null;
-      });
+    this.#quotaRefresh = this.#loadQuota().finally(() => {
+      this.#quotaRefresh = null;
+    });
     return this.#quotaRefresh;
   }
 
@@ -1922,30 +1922,21 @@ export class AntigravityAdapter implements HarnessAdapter {
       ...(this.#command ? { command: this.#command } : {}),
       environment: this.#environment,
     });
-    if (!executable) throw new HarnessAccountInspectionError("notInstalled");
+    if (!executable) return null;
     const cwd = this.#quotaCwd ?? process.cwd();
-    try {
-      return await fetchAntigravityQuota(async (arguments_) => {
-        const { stdout } = await runBuffered(
-          executable,
-          [...arguments_],
-          cwd,
-          this.#environment,
-          Math.min(this.#inspectTimeoutMs, 10_000),
-          this.#quotaAbort.signal,
-        );
-        return stdout;
-      });
-    } catch (error) {
-      const detail = errorMessage(error);
-      throw new HarnessAccountInspectionError(
-        /not authenticated|not logged in|please (?:sign in|log in|login)|sign-in required/iu.test(
-          detail,
-        )
-          ? "authenticationRequired"
-          : "failed",
+    const snapshot = await fetchAntigravityQuota(async (arguments_) => {
+      const { stdout } = await runBuffered(
+        executable,
+        [...arguments_],
+        cwd,
+        this.#environment,
+        Math.min(this.#inspectTimeoutMs, 10_000),
+        this.#quotaAbort.signal,
       );
-    }
+      return stdout;
+    });
+    if (snapshot) this.#quota = snapshot;
+    return snapshot;
   }
 
   #findSession(nativeSessionId: string): AntigravitySession | undefined {

@@ -191,11 +191,6 @@ describe("HarnessDelegationCoordinator", () => {
         requestId: "named-child",
       };
       const result = await value.coordinator.start(input);
-      expect(result).toMatchObject({
-        cwd: "/synthetic",
-        title: "Protocol review · Project review",
-        parentThreadId: parent.hostThreadId,
-      });
       expect(await value.repository.find(result.threadId)).toMatchObject({
         title: "Protocol review · Project review",
       });

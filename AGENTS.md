@@ -4,12 +4,6 @@
 
 `codexhost` runs external Agent Harnesses as independent Threads inside Codex Desktop, preserving the official shell and native Codex path. Integrate each Harness through its native interface; preserve its actual capabilities and semantics rather than inventing equivalent-looking Host behavior.
 
-## Maintained Fork
-
-- `hyhanyue/codex-host` uses `main` as its maintained distribution branch. Preserve the custom same-Thread Agent handoff, configured Composer delegation, account quota controls, and fork-only update flow when merging upstream changes.
-- Merge upstream history into this `main`; do not replace its tree with upstream or discard custom behavior to resolve conflicts. Keep the focused regression coverage for both custom and upstream behavior.
-- Update discovery and downloads must use published Releases from `hyhanyue/codex-host`, verifying that the actual release tag resolves to a commit in `main` history. No eligible fork Release means no update; never fall back to upstream Releases or upstream npm packages.
-
 ## Code Layout
 
 ### Native Rust

@@ -19,7 +19,6 @@ import {
   fetchLatestGitHubReleaseWithGitHubCli,
   recoverUpdateOperationLock,
   selectInstallerReleaseArtifact,
-  selectNpmReleaseArtifacts,
   readRuntimeMetadata,
   type BackgroundUpdateManager,
   type BackgroundUpdateStatus,
@@ -71,7 +70,7 @@ export interface CreateConsoleUpdatesOptions {
   processExecutable?: string;
   stateDirectory?: string;
   manager?: BackgroundUpdateManager;
-  fetchLatest?(signal?: AbortSignal): Promise<CodexhostLatestRelease | null>;
+  fetchLatest?(signal?: AbortSignal): Promise<CodexhostLatestRelease>;
 }
 
 function boundedError(error: unknown): string {
@@ -122,7 +121,7 @@ export function createConsoleUpdates(options: CreateConsoleUpdatesOptions): Cons
     options.stateDirectory ?? defaultUpdateStateDirectory(platform, environment);
   const fetchLatest =
     options.fetchLatest ??
-    (async (signal?: AbortSignal): Promise<CodexhostLatestRelease | null> => {
+    (async (signal?: AbortSignal): Promise<CodexhostLatestRelease> => {
       const timeoutSignal = AbortSignal.timeout(15_000);
       const requestSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
       const authenticated = await fetchLatestGitHubReleaseWithGitHubCli({
@@ -130,9 +129,7 @@ export function createConsoleUpdates(options: CreateConsoleUpdatesOptions): Cons
         platform,
         signal: requestSignal,
       });
-      return authenticated === undefined
-        ? fetchLatestGitHubRelease({ signal: requestSignal })
-        : authenticated;
+      return authenticated ?? fetchLatestGitHubRelease({ signal: requestSignal });
     });
   let candidate: CodexhostLatestRelease | null = null;
   let handedOff = false;
@@ -154,10 +151,10 @@ export function createConsoleUpdates(options: CreateConsoleUpdatesOptions): Cons
 
   function installable(metadata: DistributionMetadata, release: CodexhostLatestRelease): boolean {
     const kind = installationKind(metadata);
+    if (kind === "npm") return true;
     if (kind === null) return false;
     try {
-      if (kind === "npm") selectNpmReleaseArtifacts(release, metadata.target);
-      else selectInstallerReleaseArtifact(release, metadata.target as InstallerReleaseTarget);
+      selectInstallerReleaseArtifact(release, metadata.target as InstallerReleaseTarget);
       return true;
     } catch {
       return false;
@@ -197,7 +194,6 @@ export function createConsoleUpdates(options: CreateConsoleUpdatesOptions): Cons
       }
       return manager.prepareNpm({
         ...common,
-        ...selectNpmReleaseArtifacts(release, metadata.target),
         packageRoot,
         nodePath: absoluteEnvironmentPath(environment, "CODEXHOST_NPM_NODE_PATH"),
         npmCliPath: absoluteEnvironmentPath(environment, "CODEXHOST_NPM_CLI_PATH"),
@@ -248,7 +244,6 @@ export function createConsoleUpdates(options: CreateConsoleUpdatesOptions): Cons
         status = await latestStatus();
         const release = await fetchLatest(signal);
         candidate = release;
-        if (!release) return { ...empty, status };
         const updateAvailable = compareSemanticVersions(metadata.version, release.version) < 0;
         const installationAvailable = updateAvailable && installable(metadata, release);
         return {
@@ -299,7 +294,6 @@ export function createConsoleUpdates(options: CreateConsoleUpdatesOptions): Cons
       try {
         const release = await fetchLatest();
         if (
-          !release ||
           compareSemanticVersions(metadata.version, release.version) >= 0 ||
           (candidate && candidate.version !== release.version)
         ) {

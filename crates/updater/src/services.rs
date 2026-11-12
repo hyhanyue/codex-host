@@ -49,7 +49,7 @@ mod tests {
         let executable = format!("codexhost{}", env::consts::EXE_SUFFIX);
         for (installation, launcher, node) in [
             (
-                json!({"kind":"npm", "node_path":root.join("npm-node"), "npm_cli_path":root.join("npm.js"), "npm_launcher_path":root.join("wrapper.js"), "npm_package_root":root.join("package"), "meta_path":root.join("meta.tgz"), "meta_sha256":"0".repeat(64), "platform_path":root.join("platform.tgz"), "platform_sha256":"0".repeat(64)}),
+                json!({"kind":"npm", "node_path":root.join("npm-node"), "npm_cli_path":root.join("npm.js"), "npm_launcher_path":root.join("wrapper.js"), "npm_package_root":root.join("package")}),
                 root.join("package/bin").join(&executable),
                 root.join("npm-node"),
             ),

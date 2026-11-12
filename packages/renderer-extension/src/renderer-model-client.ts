@@ -1,26 +1,4 @@
 import {
-  COMPOSER_DELEGATE_METHOD,
-  DELEGATION_CATALOG_METHOD,
-  HANDOFF_PREVIEW_METHOD,
-  HANDOFF_SEND_METHOD,
-  composerDelegateParamsSchema,
-  composerDelegateResultSchema,
-  delegationCatalogParamsSchema,
-  delegationCatalogResultSchema,
-  handoffPreviewParamsSchema,
-  handoffPreviewResultSchema,
-  handoffSendParamsSchema,
-  handoffSendResultSchema,
-  type ComposerDelegateParams,
-  type ComposerDelegateResult,
-  type DelegationCatalogParams,
-  type DelegationCatalogResult,
-  type HandoffPreviewParams,
-  type HandoffPreviewResult,
-  type HandoffSendParams,
-  type HandoffSendResult,
-} from "@codexhost/shared-contracts";
-import {
   DELEGATION_READ_METHOD,
   delegationReadParamsSchema,
   type DelegationReadParams,
@@ -147,7 +125,6 @@ import {
   RendererMethodUnavailableError,
   type RendererRequestOptions,
 } from "./renderer-request-sender.js";
-import { beginDelegationCatalogCredentialChange } from "./renderer-delegation-catalog.js";
 import { verifyNativeCodexThread } from "./renderer-native-thread.js";
 import {
   HARNESS_PREFERENCES_GET_METHOD,
@@ -264,10 +241,6 @@ export interface RendererModelClient extends Partial<RendererSessionImportClient
   ): Promise<HarnessInspection>;
   openHarnessWebUi?(input: HarnessWebUiOpenParams): Promise<void>;
   inspectThread(input: ThreadInspectionParams): Promise<ThreadInspection>;
-  delegateFromComposer?(input: ComposerDelegateParams): Promise<ComposerDelegateResult>;
-  delegationCatalog?(input: DelegationCatalogParams): Promise<DelegationCatalogResult>;
-  previewHandoff?(input: HandoffPreviewParams): Promise<HandoffPreviewResult>;
-  sendHandoff?(input: HandoffSendParams): Promise<HandoffSendResult>;
   inspectHarnessCommands(input: HarnessCommandsInspectParams): Promise<HarnessCommandCatalog>;
   inspectThreadCommands(input: ThreadCommandsInspectParams): Promise<HarnessCommandCatalog>;
   executeThreadCommand(input: ThreadCommandExecuteParams): Promise<ThreadCommandExecuteResult>;
@@ -460,24 +433,6 @@ export function createRendererModelClient(
         ) ?? (() => {})
       );
     },
-    async delegateFromComposer(input: ComposerDelegateParams) {
-      return composerDelegateResultSchema.parse(
-        await manager.sendRequest(
-          COMPOSER_DELEGATE_METHOD,
-          composerDelegateParamsSchema.parse(input),
-        ),
-      );
-    },
-    async previewHandoff(input: HandoffPreviewParams) {
-      return handoffPreviewResultSchema.parse(
-        await manager.sendRequest(HANDOFF_PREVIEW_METHOD, handoffPreviewParamsSchema.parse(input)),
-      );
-    },
-    async sendHandoff(input: HandoffSendParams) {
-      return handoffSendResultSchema.parse(
-        await manager.sendRequest(HANDOFF_SEND_METHOD, handoffSendParamsSchema.parse(input)),
-      );
-    },
     async installation(input: HarnessInstallationParams): Promise<HarnessInstallationState> {
       return runRendererInstallation(manager.sendRequest, input);
     },
@@ -543,15 +498,6 @@ export function createRendererModelClient(
       return externalThreadForkResultSchema.parse(result);
     },
     inspectHarness,
-    async delegationCatalog(input: DelegationCatalogParams): Promise<DelegationCatalogResult> {
-      return delegationCatalogResultSchema.parse(
-        await manager.sendRequest(
-          DELEGATION_CATALOG_METHOD,
-          delegationCatalogParamsSchema.parse(input),
-          { priority: input.action === "snapshot" ? "interactive" : "background" },
-        ),
-      );
-    },
     async listHarnessPlugins(): Promise<HarnessPluginListResult> {
       return harnessPluginListResultSchema.parse(
         await manager.sendRequest(HARNESS_PLUGIN_LIST_METHOD, {}),
@@ -710,18 +656,12 @@ export function createRendererModelClient(
       request: CredentialImportsRequest,
       targetHarnessId?: string,
     ): Promise<CredentialImportsResult> {
-      const params = credentialImportsParamsSchema.parse({ request, targetHarnessId });
-      const finish =
-        request.action !== "list" && targetHarnessId
-          ? beginDelegationCatalogCredentialChange(inspectHarness, targetHarnessId)
-          : undefined;
-      try {
-        return credentialImportsResultSchema.parse(
-          await manager.sendRequest(CREDENTIAL_IMPORTS_METHOD, params),
-        );
-      } finally {
-        finish?.();
-      }
+      return credentialImportsResultSchema.parse(
+        await manager.sendRequest(
+          CREDENTIAL_IMPORTS_METHOD,
+          credentialImportsParamsSchema.parse({ request, targetHarnessId }),
+        ),
+      );
     },
     async listHarnessAccounts(
       input: HarnessAccountListParams = {},

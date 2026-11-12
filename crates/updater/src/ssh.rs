@@ -67,11 +67,17 @@ node -e 'const [major, minor] = process.versions.node.split(".").map(Number); pr
         "install" => {
             let version = release_version(request)?;
             Ok(format!(
-                "{node}set -e; {lock}[ ! -f \"$HOME/.codexhost/remote/manifest.json\" ] || exit 43; case $(uname -s) in Darwin|Linux) ;; *) exit 44;; esac; command -v npm >/dev/null 2>&1 || exit 56; command -v codexhost >/dev/null 2>&1 && exit 43; command -v codex >/dev/null 2>&1 || exit 57; npm install -g @codexhost/cli@{version} >/dev/null 2>&1 || exit 46; codexhost remote install >/dev/null 2>&1 || exit 47; codexhost remote start >/dev/null 2>&1 || {started} || exit 48; printf '\\n__CODEXHOST_SSH_STATE__=installed\\n'"
+                "{node}set -e; {lock}[ ! -f \"$HOME/.codexhost/remote/manifest.json\" ] || exit 43; case $(uname -s) in Darwin|Linux) ;; *) exit 44;; esac; command -v npm >/dev/null 2>&1 || exit 56; command -v codex >/dev/null 2>&1 || exit 57; npm install -g @codexhost/cli@{version} >/dev/null 2>&1 || exit 46; codexhost remote install >/dev/null 2>&1 || exit 47; codexhost remote start >/dev/null 2>&1 || {started} || exit 48; printf '\\n__CODEXHOST_SSH_STATE__=installed\\n'"
             ))
         }
+        // For services too old to update themselves. A newer CLI refuses to stop an installation
+        // written in an older format, so the old CLI stops the service when it is available, and
+        // the new CLI migrates the installation before stopping whatever is still running.
         "update" => {
-            Err("Install the verified Fork Release on the remote computer before restarting".into())
+            let version = release_version(request)?;
+            Ok(format!(
+                "{node}set -e; {lock}[ -f \"$HOME/.codexhost/remote/manifest.json\" ] || exit 52; command -v npm >/dev/null 2>&1 || exit 56; npm view @codexhost/cli@{version} version --fetch-retries=0 --fetch-timeout=30000 >/dev/null 2>&1 || exit 53; if command -v codexhost >/dev/null; then codexhost remote stop >/dev/null 2>&1 || true; fi; npm install -g @codexhost/cli@{version} >/dev/null 2>&1 || {{ codexhost remote start >/dev/null 2>&1 || true; exit 46; }}; command -v codexhost >/dev/null || exit 54; codexhost remote install >/dev/null 2>&1 || exit 47; codexhost remote stop >/dev/null 2>&1 || {stock} || exit 50; codexhost remote start >/dev/null 2>&1 || {started} || exit 48; printf '\\n__CODEXHOST_SSH_STATE__=installed\\n'"
+            ))
         }
         // A damaged installation is exactly what the CLI refuses to stop, so the first stop is
         // best effort; once the installation is rewritten, the second one must succeed.

@@ -11,13 +11,7 @@
 interface NativeEditorView {
   dom: Element;
   state: {
-    doc: {
-      content: { size: number };
-      textBetween(from: number, to: number, blockSeparator?: string, leafText?: string): string;
-      descendants?(
-        visit: (node: { isText: boolean; isLeaf: boolean; type: { name: string } }) => void,
-      ): void;
-    };
+    doc: { textBetween(from: number, to: number): string };
     schema: { nodes: Record<string, unknown> };
     selection: { from: number; to: number };
     tr: { delete(from: number, to: number): unknown; insertText(text: string): unknown };
@@ -151,24 +145,4 @@ export function insertNativeAgentMention(
   } catch {
     return false;
   }
-}
-
-/** Read the native draft without consuming it or attempting to serialize non-text items. */
-export function readNativeTextDraft(editor: HTMLElement): { text: string; clear(): void } | null {
-  const controller = findNativeComposerController(editor);
-  const doc = controller?.view.state.doc;
-  if (!controller || !doc || !Number.isSafeInteger(doc.content?.size)) return null;
-  let plain = true;
-  doc.descendants?.((node) => {
-    if (node.isLeaf && !node.isText && node.type.name !== "hardBreak") plain = false;
-  });
-  if (!plain) return null;
-  const text = doc.textBetween(0, doc.content.size, "\n", "\n");
-  return {
-    text,
-    clear() {
-      const { state } = controller.view;
-      if (state.doc === doc) controller.view.dispatch(state.tr.delete(0, doc.content.size));
-    },
-  };
 }

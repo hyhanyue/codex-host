@@ -1,20 +1,20 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  CODEXHOST_LATEST_RELEASE_URL,
   compareSemanticVersions,
   expectedInstallerAssetName,
   fetchLatestGitHubRelease,
   fetchLatestGitHubReleaseWithGitHubCli,
   parseLatestGitHubRelease,
   selectInstallerReleaseArtifact,
-  selectNpmReleaseArtifacts,
   type GitHubCliRunner,
 } from "@codexhost/update-manager";
 
 function release(overrides: Record<string, unknown> = {}) {
   return {
     tag_name: "v1.2.3",
-    html_url: "https://github.com/hyhanyue/codex-host/releases/tag/v1.2.3",
+    html_url: "https://github.com/BytePioneer-AI/codex-host/releases/tag/v1.2.3",
     draft: false,
     prerelease: false,
     body: "## Changes\n\n- Safer updates",
@@ -24,7 +24,7 @@ function release(overrides: Record<string, unknown> = {}) {
         size: 42,
         digest: `sha256:${"ab".repeat(32)}`,
         browser_download_url:
-          "https://github.com/hyhanyue/codex-host/releases/download/v1.2.3/codexhost-1.2.3-windows-x64.exe",
+          "https://github.com/BytePioneer-AI/codex-host/releases/download/v1.2.3/codexhost-1.2.3-windows-x64.exe",
         uploader: { login: "github-actions" },
       },
     ],
@@ -32,13 +32,6 @@ function release(overrides: Record<string, unknown> = {}) {
     ...overrides,
   };
 }
-
-const repo = "repos/hyhanyue/codex-host";
-const head = "a".repeat(40);
-const cliResponse = (endpoint: string | undefined): string =>
-  JSON.stringify(
-    endpoint?.includes("/releases?") ? [release()] : { object: { type: "commit", sha: head } },
-  );
 
 describe("GitHub Release update discovery", () => {
   it("parses the public latest response and selects one exact target asset", () => {
@@ -48,7 +41,7 @@ describe("GitHub Release update discovery", () => {
     expect(selectInstallerReleaseArtifact(parsed, "windows-x64")).toEqual({
       name: "codexhost-1.2.3-windows-x64.exe",
       source: {
-        url: "https://github.com/hyhanyue/codex-host/releases/download/v1.2.3/codexhost-1.2.3-windows-x64.exe",
+        url: "https://github.com/BytePioneer-AI/codex-host/releases/download/v1.2.3/codexhost-1.2.3-windows-x64.exe",
         sha256: "ab".repeat(32),
         size: 42,
       },
@@ -63,7 +56,7 @@ describe("GitHub Release update discovery", () => {
     expect(() =>
       parseLatestGitHubRelease(
         release({
-          html_url: "https://github.com/hyhanyue/codex-host/releases/tag/v9.9.9",
+          html_url: "https://github.com/BytePioneer-AI/codex-host/releases/tag/v9.9.9",
         }),
       ),
     ).toThrow("does not match");
@@ -74,7 +67,7 @@ describe("GitHub Release update discovery", () => {
             name: "codexhost-1.2.3-windows-x64.exe",
             size: 42,
             browser_download_url:
-              "https://github.com/hyhanyue/codex-host/releases/download/v1.2.3/codexhost-1.2.3-windows-x64.exe",
+              "https://github.com/BytePioneer-AI/codex-host/releases/download/v1.2.3/codexhost-1.2.3-windows-x64.exe",
           },
         ],
       }),
@@ -104,78 +97,25 @@ describe("GitHub Release update discovery", () => {
     expect(compareSemanticVersions("1.2.3+one", "1.2.3+two")).toBe(0);
   });
 
-  it("treats an empty Fork Release list as no update without looking at branch commits", async () => {
-    const fetchImpl = vi.fn(async () => Response.json([]));
-    await expect(fetchLatestGitHubRelease({ fetch: fetchImpl })).resolves.toBeNull();
-    expect(fetchImpl).toHaveBeenCalledExactlyOnceWith(
-      `https://api.github.com/${repo}/releases?per_page=100&page=1`,
+  it("requests only the fixed GitHub latest endpoint", async () => {
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response(JSON.stringify(release()), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+    );
+    await expect(fetchLatestGitHubRelease({ fetch: fetchImpl })).resolves.toMatchObject({
+      version: "1.2.3",
+    });
+    expect(fetchImpl).toHaveBeenCalledWith(
+      CODEXHOST_LATEST_RELEASE_URL,
       expect.objectContaining({ redirect: "error" }),
     );
   });
 
-  it("ignores other branches, drafts and previews and resolves an annotated ancestor tag", async () => {
-    const offBranch = "b".repeat(40);
-    const ancestor = "c".repeat(40);
-    const annotatedTag = "d".repeat(40);
-    const gitObject = (type: string, sha: string) => ({ object: { type, sha } });
-    const fetchImpl = vi.fn(async (input: string | URL | Request) => {
-      const url = String(input).replace("https://api.github.com/", "");
-      const values: Record<string, unknown> = {
-        [`${repo}/releases?per_page=100&page=1`]: [
-          release({ tag_name: "v9.0.0", draft: true }),
-          release({ tag_name: "v8.0.0", prerelease: true }),
-          release({ tag_name: "v7.0.0-rc.1" }),
-          release({ tag_name: "v6.0.0", target_commitish: "main" }),
-          release({ target_commitish: "codexhost-code-changes" }),
-        ],
-        [`${repo}/git/ref/heads/main`]: gitObject("commit", head),
-        [`${repo}/git/ref/tags/v6.0.0`]: gitObject("commit", offBranch),
-        [`${repo}/compare/${offBranch}...${head}?per_page=1`]: {
-          status: "diverged",
-          merge_base_commit: { sha: ancestor },
-        },
-        [`${repo}/git/ref/tags/v1.2.3`]: gitObject("tag", annotatedTag),
-        [`${repo}/git/tags/${annotatedTag}`]: gitObject("commit", ancestor),
-        [`${repo}/compare/${ancestor}...${head}?per_page=1`]: {
-          status: "ahead",
-          merge_base_commit: { sha: ancestor },
-        },
-      };
-      if (!(url in values)) throw new Error(`Unexpected request ${url}`);
-      return Response.json(values[url]);
-    });
-    await expect(fetchLatestGitHubRelease({ fetch: fetchImpl })).resolves.toMatchObject({
-      version: "1.2.3",
-    });
-    expect(fetchImpl).toHaveBeenCalledTimes(7);
-  });
-
-  it("requires both Fork npm assets with exact names, URLs and SHA-256 digests", () => {
-    const npmAsset = (name: string) => ({
-      name,
-      size: 42,
-      digest: `sha256:${"ab".repeat(32)}`,
-      browser_download_url: `https://github.com/hyhanyue/codex-host/releases/download/v1.2.3/${name}`,
-    });
-    const meta = npmAsset("codexhost-cli-1.2.3.tgz");
-    const platform = npmAsset("codexhost-cli-1.2.3-macos-arm64.tgz");
-    const parsed = parseLatestGitHubRelease(release({ assets: [meta, platform] }));
-    expect(selectNpmReleaseArtifacts(parsed, "macos-arm64")).toMatchObject({
-      metaArtifact: { url: meta.browser_download_url, size: 42 },
-      platformArtifact: { url: platform.browser_download_url, size: 42 },
-    });
-    expect(() => selectNpmReleaseArtifacts(parsed, "macos-x64")).toThrow("exactly one");
-    const upstream = {
-      ...platform,
-      browser_download_url: platform.browser_download_url.replace("hyhanyue", "BytePioneer-AI"),
-    };
-    expect(() => parseLatestGitHubRelease(release({ assets: [meta, upstream] }))).toThrow(
-      "invalid",
-    );
-  });
-
   it("uses the authenticated GitHub CLI without exposing its token", async () => {
-    const run = vi.fn<GitHubCliRunner>(async (_executable, args) => cliResponse(args.at(-1)));
+    const run = vi.fn(async () => JSON.stringify(release()));
     await expect(
       fetchLatestGitHubReleaseWithGitHubCli({
         environment: { PATH: "/usr/bin:/bin" },
@@ -195,7 +135,7 @@ describe("GitHub Release update discovery", () => {
         "Accept: application/vnd.github+json",
         "--header",
         "X-GitHub-Api-Version: 2022-11-28",
-        `${repo}/releases?per_page=100&page=1`,
+        "repos/BytePioneer-AI/codex-host/releases/latest",
       ],
       { environment: { PATH: "/usr/bin:/bin" } },
     );
@@ -210,14 +150,14 @@ describe("GitHub Release update discovery", () => {
         executableCandidates: ["gh", "/opt/homebrew/bin/gh"],
         run,
       }),
-    ).resolves.toBeUndefined();
+    ).resolves.toBeNull();
     expect(run).toHaveBeenCalledTimes(2);
   });
 
   it("finds Homebrew gh with the minimal macOS GUI PATH", async () => {
-    const run = vi.fn<GitHubCliRunner>(async (executable, args) => {
+    const run = vi.fn(async (executable: string) => {
       if (executable === "gh") throw Object.assign(new Error("missing"), { code: "ENOENT" });
-      return cliResponse(args.at(-1));
+      return JSON.stringify(release());
     });
     await expect(
       fetchLatestGitHubReleaseWithGitHubCli({
@@ -229,17 +169,15 @@ describe("GitHub Release update discovery", () => {
     expect(run.mock.calls.map(([executable]) => executable)).toEqual([
       "gh",
       "/opt/homebrew/bin/gh",
-      "/opt/homebrew/bin/gh",
-      "/opt/homebrew/bin/gh",
     ]);
   });
 
   it.each(["win32", "linux"] as const)("discovers native gh on %s", async (platform) => {
     const expected =
       platform === "win32" ? "C:\\Program Files\\GitHub CLI\\gh.exe" : "/usr/local/bin/gh";
-    const run = vi.fn<GitHubCliRunner>(async (executable, args) => {
+    const run = vi.fn(async (executable: string) => {
       if (executable !== expected) throw Object.assign(new Error("missing"), { code: "ENOENT" });
-      return cliResponse(args.at(-1));
+      return JSON.stringify(release());
     });
     await expect(
       fetchLatestGitHubReleaseWithGitHubCli({
@@ -260,7 +198,7 @@ describe("GitHub Release update discovery", () => {
         environment: { CODEXHOST_GH_COMMAND: "/custom/gh" },
         run,
       }),
-    ).resolves.toBeUndefined();
+    ).resolves.toBeNull();
     expect(run).toHaveBeenCalledOnce();
     expect(run.mock.calls[0]?.[0]).toBe("/custom/gh");
   });
@@ -274,7 +212,7 @@ describe("GitHub Release update discovery", () => {
         executableCandidates: ["gh", "/opt/homebrew/bin/gh"],
         run,
       }),
-    ).resolves.toBeUndefined();
+    ).resolves.toBeNull();
     expect(run).toHaveBeenCalledOnce();
   });
 
@@ -284,7 +222,7 @@ describe("GitHub Release update discovery", () => {
     JSON.stringify(release({ html_url: "https://example.com/release" })),
   ])("rejects invalid CLI release output", async (output) => {
     const run = vi.fn(async () => output);
-    await expect(fetchLatestGitHubReleaseWithGitHubCli({ run })).resolves.toBeUndefined();
+    await expect(fetchLatestGitHubReleaseWithGitHubCli({ run })).resolves.toBeNull();
     expect(run).toHaveBeenCalledOnce();
   });
 

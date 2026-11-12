@@ -247,7 +247,7 @@ export const harnessWebUiCapabilitySchema = z
 
 export type HarnessWebUiCapability = z.infer<typeof harnessWebUiCapabilitySchema>;
 
-export const readyHarnessInspectionSchema = z
+const readyHarnessInspectionSchema = z
   .object({
     status: z.literal("ready"),
     catalog: harnessModelCatalogSchema,
@@ -287,7 +287,6 @@ export const harnessInspectParamsSchema = z
   .object({
     harnessId: harnessIdSchema,
     cwd: nonBlankTextSchema.max(16_384).optional(),
-    threadId: hostThreadIdSchema.optional(),
     refresh: z.boolean().optional(),
     /** `availability` asks only whether the Harness can run; see `InspectHarnessInput.purpose`. */
     purpose: z.literal("availability").optional(),

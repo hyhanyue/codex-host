@@ -1,7 +1,6 @@
 import type {
   HarnessAdapter,
   HarnessModelRef,
-  HarnessOutput,
   HarnessResult,
   HarnessSession,
   HarnessSessionState,
@@ -219,10 +218,7 @@ function recoveryError(error: unknown): ExternalThreadRpcError {
 export class ExternalThreadRuntime {
   readonly idleRelease: ExternalThreadIdleRelease;
   readonly #adapters: Map<ExternalHarnessId, HarnessAdapter>;
-  readonly #consumeOutputs: (
-    thread: ExternalThread,
-    outputs?: AsyncIterable<HarnessOutput>,
-  ) => Promise<void>;
+  readonly #consumeOutputs: (thread: ExternalThread) => Promise<void>;
   readonly #diagnose: (error: unknown) => void;
   readonly #environment: NodeJS.ProcessEnv;
   readonly #repository: ExternalThreadRepository;
@@ -236,7 +232,7 @@ export class ExternalThreadRuntime {
     adapters: Map<ExternalHarnessId, HarnessAdapter>;
     environment?: NodeJS.ProcessEnv;
     repository: ExternalThreadRepository;
-    consumeOutputs(thread: ExternalThread, outputs?: AsyncIterable<HarnessOutput>): Promise<void>;
+    consumeOutputs(thread: ExternalThread): Promise<void>;
     diagnose(error: unknown): void;
     subagentRunning?(threadId: string): boolean;
     hasRunningDescendants?(threadId: string): boolean;
@@ -385,7 +381,6 @@ export class ExternalThreadRuntime {
     transportModelId?: string;
     restoredState?: HarnessSessionState;
     unsubmittedPrewarm?: boolean;
-    outputs?: AsyncIterable<HarnessOutput>;
   }): ExternalThread {
     const harnessId = input.record.harnessId as ExternalHarnessId;
     if (!this.#adapters.has(harnessId)) {
@@ -452,7 +447,7 @@ export class ExternalThreadRuntime {
     };
     this.#restoreUsageMeasurements(externalThread);
     this.idleRelease.touch(externalThread);
-    externalThread.outputTask = this.#consumeOutputs(externalThread, input.outputs);
+    externalThread.outputTask = this.#consumeOutputs(externalThread);
     this.#threads.set(externalThread.id, externalThread);
     return externalThread;
   }
@@ -479,7 +474,6 @@ export class ExternalThreadRuntime {
       thread: JsonObject;
       turns: JsonObject[];
       restoredState?: HarnessSessionState;
-      outputs?: AsyncIterable<HarnessOutput>;
     },
   ): Promise<ExternalThread> {
     if (

@@ -32,7 +32,7 @@
   <a href="../harnesses/copilot/copilot-harness-integration.md"><img alt="GitHub Copilot" src="https://img.shields.io/badge/Copilot-181717?logo=githubcopilot&logoColor=white" /></a>
 </p>
 
-<p align="center"><a href="https://github.com/hyhanyue/codex-host/releases"><strong>下载</strong></a> · <a href="#快速开始">快速开始</a> · <a href="#在-codex-desktop-里用所有-agent">Desktop</a> · <a href="#多-agent-分工">多 Agent 分工</a> · <a href="#加入交流群">微信交流群</a> · <a href="../../README.md">English</a> · <a href="README.ko.md">한국어</a></p>
+<p align="center"><a href="https://github.com/BytePioneer-AI/codex-host/releases"><strong>下载</strong></a> · <a href="#快速开始">快速开始</a> · <a href="#在-codex-desktop-里用所有-agent">Desktop</a> · <a href="#多-agent-分工">多 Agent 分工</a> · <a href="#加入交流群">微信交流群</a> · <a href="../../README.md">English</a> · <a href="README.ko.md">한국어</a></p>
 
 <img width="90%" src="../imgs/hero-desktop-phone.png" alt="Codex Desktop 中同一项目下的多个 Agent 会话与 Diff 审查面板，右下角是手机上打开的同一个会话">
 
@@ -57,21 +57,16 @@
 
 **方式一：npm**（macOS / Windows / Linux）
 
-先从[本 Fork 的 Releases](https://github.com/hyhanyue/codex-host/releases) 下载同一版本的平台包与元包，再把下面的文件名替换为实际下载的文件名。直接从公共 npm 仓库安装 `@codexhost/cli` 会安装上游版本。
-
 ```bash
-npm install -g --offline --omit=optional --ignore-scripts ./codexhost-cli-<version>-<platform>.tgz ./codexhost-cli-<version>.tgz
-codexhost
-
+npm install -g @codexhost/cli
+codexhost          # 启动 Codex Desktop
 codexhost web      # 启动 Web 并在浏览器中打开
 codexhost stop     # 停止 CodexHost 的全部后台服务
 ```
 
-本 Fork 的 `main` 持续维护同一会话 Agent 交接、`#` 模型与思考强度委派、账户额度控件。内置更新只检查 `hyhanyue/codex-host` 中标签提交位于 `main` 历史上的正式 GitHub Release。npm 安装的更新需要将 `release:npm:meta` 和 `release:npm` 打包生成的 `codexhost-cli-<版本>.tgz` 与 `codexhost-cli-<版本>-<平台>.tgz` 一起上传至该 Release。缺少任一安装包时，仍可查看发布说明。远程服务更新需先在远程电脑安装相应 Fork Release，再重启服务。
-
 **方式二：安装包**（macOS / Windows）
 
-从 [Releases](https://github.com/hyhanyue/codex-host/releases) 下载对应平台的安装包。Web 端：安装后打开 codexhost，本地访问 http://127.0.0.1:4400 。
+从 [Releases](https://github.com/BytePioneer-AI/codex-host/releases) 下载对应平台的安装包。Web 端：安装后打开 codexhost，本地访问 http://127.0.0.1:4400 。
 
 > Linux 支持 x64 / ARM64，详见 [Linux 说明](../platforms/linux/linux.zh-CN.md)。
 
@@ -226,7 +221,7 @@ https://github.com/user-attachments/assets/c48192d7-23ff-4f6e-b61a-6345a655bb76
 1. 在被控机器上安装并启动：
 
    ```bash
-   npm install -g --offline --omit=optional --ignore-scripts ./codexhost-cli-<version>-<platform>.tgz ./codexhost-cli-<version>.tgz
+   npm install -g @codexhost/cli
    codexhost remote install
    codexhost remote start
    codexhost remote status
@@ -290,7 +285,7 @@ https://github.com/user-attachments/assets/c48192d7-23ff-4f6e-b61a-6345a655bb76
 环境要求：官方 Codex Desktop、Node.js 22.19+ 或 24、Rust。
 
 ```bash
-git clone https://github.com/hyhanyue/codex-host
+git clone https://github.com/BytePioneer-AI/codex-host
 cd codex-host
 npm ci
 npm start

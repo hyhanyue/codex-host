@@ -925,12 +925,11 @@ describe("AppServerHost HarnessAdapter projection", () => {
     const session = fixture.adapter.sessions[0];
     if (!session) throw new Error("Delegated Session was not opened");
     session.succeedTurn();
-    await fixture.collector.waitFor((message) =>
-      turnEvent(message, "turn/completed", started.turnId),
+    await vi.waitFor(async () =>
+      expect(
+        await delegationApi?.read({ threadId: started.threadId, view: "result" }),
+      ).toMatchObject({ status: "completed" }),
     );
-    await expect(
-      delegationApi.read({ threadId: started.threadId, view: "result" }),
-    ).resolves.toMatchObject({ status: "completed" });
     const followUp = await delegationApi.send({ threadId: started.threadId, message: "continue" });
     expect(followUp).toMatchObject({ harnessId: "pi", status: "running" });
     await expect(
@@ -941,9 +940,6 @@ describe("AppServerHost HarnessAdapter projection", () => {
       cancelled: true,
     });
     session.completeCancellation();
-    await fixture.collector.waitFor((message) =>
-      turnEvent(message, "turn/completed", followUp.turnId),
-    );
     await stopFixture(fixture);
   });
 

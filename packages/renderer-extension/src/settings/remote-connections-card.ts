@@ -13,6 +13,7 @@ export type RemoteCardAction =
   | "remove"
   | "install"
   | "update"
+  | "upgrade"
   | "repair"
   | "uninstall"
   | "recheck";
@@ -70,8 +71,12 @@ export function remoteMaintenanceTarget(
 ): string | null {
   if (!remote.updateSupported) return null;
   return (
-    remoteUpdateTarget(local, remote) ?? (remote.restartRequired ? remote.installedVersion : null)
+    newerLocalVersion(local, remote) ?? (remote.restartRequired ? remote.installedVersion : null)
   );
+}
+
+function newerLocalVersion(local: RuntimeStatus | null, remote: RuntimeStatus): string | null {
+  return remoteUpdateTarget(local, { ...remote, update: { ...remote.update, phase: "idle" } });
 }
 
 export function remoteBusy(remote: RuntimeStatus | null): boolean {
@@ -133,13 +138,27 @@ function serviceSummary(
       return { title: t("需要安装远程服务", "Remote service needs installation"), hints };
     }
     if (row.remoteIssue?.outdated) {
-      hints.push([
-        "warning",
-        t(
-          "请在远程电脑上从 Fork Releases 更新 codexhost，再重新连接。",
-          "Install the Fork Release on the remote computer, then reconnect.",
-        ),
-      ]);
+      const version = remoteInstallVersion(local);
+      hints.push(
+        version
+          ? [
+              "neutral",
+              t(
+                `更新到本机版本 ${version} 后可在这里查看和管理版本。`,
+                `Update to this computer's version ${version} to manage versions here.`,
+              ),
+            ]
+          : [
+              "warning",
+              t(
+                "本机不是正式发布版本，无法从这里更新；请在远程电脑上手动更新 codexhost。",
+                "This computer is not running a published release, so it cannot update the remote. Update codexhost on the remote computer manually.",
+              ),
+            ],
+      );
+      // Reached when the connection is not answered by a manageable service: an old version, or
+      // a damaged installation that lets SSH sessions fall through to stock Codex. Updating
+      // reinstalls the service, which fixes both.
       return { title: t("远程服务需要更新", "Remote service needs an update"), hints };
     }
     hints.push([
@@ -187,25 +206,23 @@ function serviceSummary(
       "warning",
       t("需要重启以使用已安装的版本", "Restart needed to use the installed version"),
     ]);
+  const newer = newerLocalVersion(local, remote);
   const localVersion = local?.runningVersion;
-  if (
-    !remoteBusy(remote) &&
-    localVersion &&
-    remote.installedVersion === localVersion &&
-    !remote.restartRequired
-  )
+  if (remoteBusy(remote)) {
+    // The running update already says what is happening.
+  } else if (newer && remote.installedVersion !== localVersion)
+    hints.push([
+      "warning",
+      t(`有更新可用 · 本机为 ${newer}`, `Update available · this computer runs ${newer}`),
+    ]);
+  else if (localVersion && remote.installedVersion === localVersion && !remote.restartRequired)
     hints.push(["success", t("与本机版本一致", "Matches this computer")]);
-  if (
-    localVersion &&
-    remote.installedVersion &&
-    localVersion !== remote.installedVersion &&
-    !remote.restartRequired
-  )
+  if (localVersion && remote.installedVersion && localVersion !== remote.installedVersion && !newer)
     hints.push([
       "warning",
       t(
-        "版本不同。请在需要更新的电脑上检查 Fork Releases。",
-        "Versions differ. Check Fork Releases on the computer that needs updating.",
+        "版本不同，请先检查本机更新；不会自动降低远程版本。",
+        "Versions differ. Check for a local update; the remote version will not be downgraded.",
       ),
     ]);
   return { title, hints };
@@ -323,7 +340,12 @@ export function renderRemoteCard(
     // Without an installed service the connection reaches stock Codex, which also rejects the
     // version query; that is a missing installation, not an outdated one.
     const outdated = !remote && !!row.remoteIssue?.outdated && row.installation !== "not-installed";
-    if (outdated || remoteTroubled(row)) {
+    if (outdated) {
+      // Repairing or rechecking cannot help a service that predates version management.
+      const upgrade = command("upgrade", t("更新远程服务", "Update remote service"), true);
+      upgrade.disabled ||= !remoteInstallVersion(local);
+      serviceActions.append(upgrade);
+    } else if (remoteTroubled(row)) {
       if (row.installation !== "not-installed") {
         const repair = command("repair", t("修复远程服务", "Repair remote service"));
         repair.title = t(
@@ -340,7 +362,13 @@ export function renderRemoteCard(
       install.disabled ||= !remoteInstallVersion(local);
       serviceActions.append(install);
     } else if (remote && target && !remoteBusy(remote)) {
-      const update = command("update", t("重启并连接", "Restart and connect"), true);
+      const update = command(
+        "update",
+        target === remote.installedVersion
+          ? t("重启并连接", "Restart and connect")
+          : t("更新到本机版本", "Match local version"),
+        true,
+      );
       serviceActions.append(update);
     }
   }

@@ -11,8 +11,6 @@ const native = vi.hoisted(() => ({
   ignoreEffort: false,
   ignoreModel: false,
   modelReply: "complete" as "complete" | "before" | "after" | "never" | "wrongSession",
-  omitEffortOnModelWrite: false,
-  omitEffortMetadataFromSession: false,
   emptyTemplates: 0,
   requests: [] as Array<{ method: string; params: Record<string, unknown> }>,
 }));
@@ -50,15 +48,6 @@ function configOptions() {
         ]
       : []),
   ];
-}
-
-function modelWithoutEffortMetadata() {
-  return configOptions()
-    .filter((option) => option.id === "model")
-    .map((option) => ({
-      ...option,
-      options: option.options.map(({ value, name }) => ({ value, name })),
-    }));
 }
 
 vi.mock("../src/command.js", async (original) => ({
@@ -102,12 +91,7 @@ vi.mock("node:child_process", async (original) => ({
           };
         if (request.method === "session/fork") result = { sessionId: "native" };
         if (request.method === "session/new" || request.method === "session/load")
-          result = {
-            sessionId: "native",
-            configOptions: native.omitEffortMetadataFromSession
-              ? modelWithoutEffortMetadata()
-              : configOptions(),
-          };
+          result = { sessionId: "native", configOptions: configOptions() };
         if (request.method === "session/set_config_option") {
           if (request.params.configId === "model" && !native.ignoreModel)
             native.model = request.params.value;
@@ -115,12 +99,6 @@ vi.mock("node:child_process", async (original) => ({
             native.effort = request.params.value;
           result = { configOptions: configOptions() };
           if (request.params.configId === "model") {
-            if (native.omitEffortOnModelWrite)
-              result = {
-                configOptions: configOptions().filter((option) => option.id !== "effortLevel"),
-              };
-            if (native.omitEffortMetadataFromSession)
-              result = { configOptions: modelWithoutEffortMetadata() };
             if (native.modelReply !== "complete")
               result = { configOptions: configOptions().filter((option) => option.id !== "model") };
             const notification =
@@ -159,8 +137,6 @@ beforeEach(() => {
   native.ignoreEffort = false;
   native.ignoreModel = false;
   native.modelReply = "complete";
-  native.omitEffortOnModelWrite = false;
-  native.omitEffortMetadataFromSession = false;
   native.emptyTemplates = 0;
   native.requests.length = 0;
   transport = new KiroAcpTransport({ cwd: process.cwd() });
@@ -303,39 +279,6 @@ describe("Kiro native effort configuration", () => {
       { sessionId: "native", configId: "model", value: "adjustable" },
       { sessionId: "native", configId: "effortLevel", value: "high" },
     ]);
-  });
-
-  it("applies advertised effort when the model reply omits the effort option", async () => {
-    native.omitEffortOnModelWrite = true;
-    const result = await transport.open({
-      kind: "create",
-      modelId: "adjustable",
-      effortLevel: "high",
-    });
-    expect(result.configOptions).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ id: "model", currentValue: "adjustable" }),
-        expect.objectContaining({ id: "effortLevel", currentValue: "high" }),
-      ]),
-    );
-  });
-
-  it("uses the native template when both session replies omit the model's effort metadata", async () => {
-    native.model = "fixed";
-    native.omitEffortMetadataFromSession = true;
-    const result = await transport.open({
-      kind: "create",
-      modelId: "adjustable",
-      effortLevel: "high",
-    });
-    expect(result.configOptions).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ id: "effortLevel", currentValue: "high" }),
-      ]),
-    );
-    expect(
-      native.requests.slice(-3).map(({ method, params }) => params.configId ?? method),
-    ).toEqual(["model", "_kiro/config/template", "effortLevel"]);
   });
 
   it.each([

@@ -1,4 +1,4 @@
-//! Lifecycle switching for the installed headless SSH service.
+//! npm installation and lifecycle switching for the headless SSH service.
 use serde::Deserialize;
 use serde_json::json;
 use std::{
@@ -138,11 +138,6 @@ fn status_already_failed(request: &Request) -> Result<bool, Box<dyn Error>> {
         && value["targetVersion"].as_str() == Some(request.version.as_str()))
 }
 fn apply_locked(request: &Request) -> Result<(), Box<dyn Error>> {
-    if !request.restart_only {
-        return Err(
-            "Install the verified Fork Release on the remote computer before restarting".into(),
-        );
-    }
     fs::create_dir_all(&request.lock_directory)?;
     let lock = request.lock_directory.join("active-update-v1.lock");
     // Same lock as Desktop's updater; never install into one npm prefix concurrently.
@@ -179,7 +174,80 @@ fn apply_locked(request: &Request) -> Result<(), Box<dyn Error>> {
         if before["version"].as_str() != Some(&request.installed_version) {
             return Err("The remote installation changed before the update acquired its lock; refresh and retry".into());
         }
-        if request.version != request.installed_version {
+        if !request.restart_only {
+            // Check that npm belongs to the installation being replaced, not another Node prefix.
+            let output = Command::new(&request.node)
+                .arg(&request.npm)
+                .args(["root", "--global"])
+                .output()?;
+            if !output.status.success() {
+                return Err("Could not identify the global npm installation".into());
+            }
+            let prefix = PathBuf::from(String::from_utf8(output.stdout)?.trim());
+            let global_platform =
+                request.package_root.parent().and_then(Path::parent) == Some(prefix.as_path());
+            let launcher_root = request
+                .launcher
+                .parent()
+                .and_then(Path::parent)
+                .ok_or("Invalid npm launcher path")?;
+            if !global_platform
+                && !(launcher_root.parent().and_then(Path::parent) == Some(prefix.as_path())
+                    && request
+                        .package_root
+                        .starts_with(launcher_root.join("node_modules")))
+            {
+                return Err(
+                    "npm uses a different global installation; update this remote manually".into(),
+                );
+            }
+            let package = format!("@codexhost/cli@{}", request.version);
+            // Unpublished local builds fail here, before touching the installation or service.
+            run(Command::new(&request.node).arg(&request.npm).args([
+                "view",
+                &package,
+                "version",
+                "--fetch-retries=0",
+                "--fetch-timeout=30000",
+            ]))
+            .map_err(|error| {
+                format!(
+                    "The requested release is unavailable or npm cannot reach the registry: {error}"
+                )
+            })?;
+            status(request, "installing", None)?;
+            let mut command = Command::new(&request.node);
+            command.arg(&request.npm).args([
+                "install",
+                "--global",
+                "--no-audit",
+                "--no-fund",
+                &package,
+            ]);
+            if global_platform {
+                let name = request
+                    .package_root
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .ok_or("Invalid platform package path")?;
+                if ![
+                    "cli-darwin-arm64",
+                    "cli-darwin-x64",
+                    "cli-linux-arm64",
+                    "cli-linux-x64",
+                ]
+                .contains(&name)
+                {
+                    return Err("Unknown remote platform package".into());
+                }
+                command.arg(format!("@codexhost/{name}@{}", request.version));
+            }
+            run(&mut command).map_err(|error| format!("npm installation failed; check remote network access and write permissions: {error}"))?;
+        }
+        let metadata: serde_json::Value = serde_json::from_slice(&fs::read(
+            request.package_root.join("app/codexhost-distribution.json"),
+        )?)?;
+        if metadata["version"].as_str() != Some(&request.version) {
             return Err("Installed remote version does not match the requested version".into());
         }
         status(request, "restarting", None)?;
@@ -210,7 +278,7 @@ mod tests {
             let _ = fs::remove_dir_all(&self.root);
         }
     }
-    fn fixture() -> Fixture {
+    fn fixture(view_failure: bool) -> Fixture {
         let root = std::env::temp_dir().join(format!(
             "codexhost-remote-updater-{}-{}",
             std::process::id(),
@@ -226,7 +294,12 @@ mod tests {
         // Interpret fixture scripts with the installed shell instead of executing a newly
         // written file, which can race with parallel child spawns on Linux (ETXTBSY).
         // These scripts record commands without invoking npm or a real service.
-        let source = format!("echo \"$1\" >> '{}'\n", root.join("calls").display(),);
+        let source = format!(
+            "echo \"$1\" >> '{}'\nif [ \"$1\" = root ]; then echo '{}'; fi\nif [ \"$1\" = view ]; then exit {}; fi\nexit 0\n",
+            root.join("calls").display(),
+            root.join("node_modules").display(),
+            if view_failure { 1 } else { 0 },
+        );
         fs::write(root.join("npm"), &source).unwrap();
         fs::write(root.join("launcher"), &source).unwrap();
         let request = Request {
@@ -243,14 +316,15 @@ mod tests {
         Fixture { root, request }
     }
     #[test]
-    fn version_change_never_runs_npm_or_stops_the_service() {
-        let f = fixture();
+    fn unavailable_release_never_stops_the_service() {
+        let f = fixture(true);
         let error = apply_locked(&f.request).unwrap_err().to_string();
         assert!(
-            error.contains("Install the verified Fork Release"),
+            error.contains("The requested release is unavailable or npm cannot reach the registry"),
             "unexpected update failure: {error}"
         );
-        assert!(!f.root.join("calls").exists());
+        let calls = fs::read_to_string(f.root.join("calls")).unwrap();
+        assert_eq!(calls, "root\nview\n");
         assert!(
             !f.request
                 .lock_directory
@@ -260,7 +334,7 @@ mod tests {
     }
     #[test]
     fn same_version_restart_skips_npm_and_reinstalls_the_manifest() {
-        let mut f = fixture();
+        let mut f = fixture(false);
         f.request.restart_only = true;
         apply_locked(&f.request).unwrap();
         assert_eq!(
@@ -273,8 +347,7 @@ mod tests {
     }
     #[test]
     fn refuses_concurrent_desktop_update() {
-        let mut f = fixture();
-        f.request.restart_only = true;
+        let f = fixture(false);
         fs::create_dir_all(&f.request.lock_directory).unwrap();
         fs::write(
             f.request.lock_directory.join("active-update-v1.lock"),
@@ -291,7 +364,7 @@ mod tests {
     }
     #[test]
     fn mismatched_installation_is_not_restarted() {
-        let mut f = fixture();
+        let mut f = fixture(false);
         f.request.restart_only = true;
         f.request.version = "0.12.0".into();
         assert!(

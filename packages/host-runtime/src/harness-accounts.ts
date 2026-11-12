@@ -3,7 +3,6 @@ import {
   harnessAccountInspectResultSchema,
   harnessAccountSnapshotSchema,
   harnessAccountSourceListResultSchema,
-  harnessAccountUnavailableReasonSchema,
   type HarnessAccountInspectResult,
   type HarnessAccountListResult,
   type HarnessAccountSnapshot,
@@ -52,7 +51,7 @@ export async function inspectHarnessAccount(
     harnessName: harnessName(adapter.harnessId, descriptors),
   };
   if (!adapter.inspectAccount && !adapter.inspectAccounts) {
-    return { ...identity, account: null, unavailableReason: "unsupported" };
+    return harnessAccountInspectResultSchema.parse({ ...identity, account: null });
   }
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
@@ -60,8 +59,8 @@ export async function inspectHarnessAccount(
       Promise.resolve().then(async (): Promise<unknown> =>
         adapter.inspectAccounts ? adapter.inspectAccounts() : adapter.inspectAccount?.(),
       ),
-      new Promise<never>((_resolve, reject) => {
-        timer = setTimeout(() => reject(new Error("Account inspection timed out")), timeoutMs);
+      new Promise<null>((resolve) => {
+        timer = setTimeout(() => resolve(null), timeoutMs);
       }),
     ]);
     const accounts = projectAccountSnapshots(value);
@@ -70,18 +69,8 @@ export async function inspectHarnessAccount(
       account: accounts[0] ?? null,
       ...(accounts.length > 1 ? { accounts } : {}),
     });
-  } catch (error) {
-    // Bundled plugins can have their own copy of the public adapter class.
-    const reason = harnessAccountUnavailableReasonSchema.safeParse(
-      error && typeof error === "object" && "accountUnavailableReason" in error
-        ? error.accountUnavailableReason
-        : undefined,
-    );
-    return {
-      ...identity,
-      account: null,
-      unavailableReason: reason.success ? reason.data : "failed",
-    };
+  } catch {
+    return harnessAccountInspectResultSchema.parse({ ...identity, account: null });
   } finally {
     if (timer !== undefined) clearTimeout(timer);
   }

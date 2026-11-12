@@ -34,13 +34,12 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  NPM_RELEASE_TARGETS: macos-arm64,macos-x64
   SOURCE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
 
 jobs:
   prepare:
     name: Resolve release metadata
-    runs-on: macos-26
+    runs-on: ubuntu-latest
     timeout-minutes: 35
     permissions:
       contents: read
@@ -118,7 +117,8 @@ jobs:
     needs: prepare
     runs-on: ${{ matrix.runner }}
     env:
-      # Release builds do not need the rustfmt/clippy components in rust-toolchain.toml.
+      # Skip rust-toolchain.toml component installs (rustfmt/clippy); they conflict with the
+      # runner-provided toolchain on Linux ARM64 and the release build does not need them.
       RUSTUP_TOOLCHAIN: 1.97.1
     strategy:
       fail-fast: false
@@ -130,6 +130,18 @@ jobs:
           - target: macos-x64
             runner: macos-15-intel
             rustTarget: x86_64-apple-darwin
+          - target: windows-x64
+            runner: windows-latest
+            rustTarget: x86_64-pc-windows-msvc
+          - target: windows-arm64
+            runner: windows-latest
+            rustTarget: aarch64-pc-windows-msvc
+          - target: linux-x64
+            runner: ubuntu-22.04
+            rustTarget: x86_64-unknown-linux-gnu
+          - target: linux-arm64
+            runner: ubuntu-22.04-arm
+            rustTarget: aarch64-unknown-linux-gnu
 
     steps:
       - name: Checkout immutable release commit
@@ -153,7 +165,13 @@ jobs:
           toolchain: 1.97.1
           targets: ${{ matrix.rustTarget }}
 
+      - name: Setup Inno Setup
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+
       - name: Install create-dmg
+        if: runner.os == 'macOS'
         run: brew install create-dmg
 
       - name: Install dependencies
@@ -163,9 +181,11 @@ jobs:
         run: npm run build:typescript
 
       - name: Build installer package
+        if: runner.os != 'Linux'
         run: npm run release:package -- --target ${{ matrix.target }}
 
       - name: Build npm package from installer outputs
+        if: runner.os != 'Linux'
         shell: bash
         run: >
           npm run release:npm --
@@ -174,12 +194,26 @@ jobs:
           --pack
           --skip-build
 
+      - name: Setup cargo-zigbuild
+        if: runner.os == 'Linux'
+        run: |
+          python3 -m venv "$RUNNER_TEMP/zigbuild"
+          "$RUNNER_TEMP/zigbuild/bin/python" -m pip install --disable-pip-version-check \
+            --require-hashes --only-binary :all: -r scripts/release/linux-zigbuild-requirements.txt
+          echo "$RUNNER_TEMP/zigbuild/bin" >> "$GITHUB_PATH"
+
+      - name: Build and smoke-test Linux npm package
+        if: runner.os == 'Linux'
+        run: >
+          node scripts/release/smoke-npm-package.mjs
+          --target ${{ matrix.target }}
+          --version ${{ needs.prepare.outputs.version }}
+
       - name: Build npm meta package
         if: matrix.target == 'macos-arm64'
         shell: bash
         run: >
           npm run release:npm:meta --
-          --targets "$NPM_RELEASE_TARGETS"
           --version ${{ needs.prepare.outputs.version }}
           --pack
 
@@ -189,6 +223,7 @@ jobs:
           name: codexhost-${{ matrix.target }}
           path: |
             build/release/${{ needs.prepare.outputs.version }}/${{ matrix.target }}/codexhost-*.dmg
+            build/release/${{ needs.prepare.outputs.version }}/${{ matrix.target }}/codexhost-*.exe
             build/npm/${{ needs.prepare.outputs.version }}/${{ matrix.target }}/codexhost-cli-*-${{ matrix.target }}.tgz
             build/npm/${{ needs.prepare.outputs.version }}/meta/codexhost-cli-${{ needs.prepare.outputs.version }}.tgz
           if-no-files-found: error
@@ -198,7 +233,7 @@ jobs:
     name: Publish npm registry packages
     if: github.event_name != 'workflow_dispatch' || !inputs.skip_npm
     needs: [prepare, package]
-    runs-on: macos-26
+    runs-on: ubuntu-latest
     permissions:
       contents: read
       actions: read
@@ -267,7 +302,6 @@ jobs:
           RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
         run: >
           npm run release:npm:publish --
-          --targets "$NPM_RELEASE_TARGETS"
           --artifacts build/npm-publish
           --version "$RELEASE_VERSION"
           --tag "$NPM_TAG"
@@ -281,7 +315,7 @@ jobs:
       (needs.publish-npm.result == 'success' ||
       (github.event_name == 'workflow_dispatch' && inputs.skip_npm && needs.publish-npm.result == 'skipped'))
     needs: [prepare, package, publish-npm]
-    runs-on: macos-26
+    runs-on: ubuntu-latest
     permissions:
       contents: write
       actions: read
@@ -347,17 +381,14 @@ jobs:
           expected=(
             "codexhost-${VERSION}-macos-arm64.dmg"
             "codexhost-${VERSION}-macos-x64.dmg"
+            "codexhost-${VERSION}-windows-x64.exe"
+            "codexhost-${VERSION}-windows-arm64.exe"
           )
           files=()
           for name in "${expected[@]}"; do
-            matches=()
-            match_count=0
-            while IFS= read -r -d '' match; do
-              matches+=("$match")
-              match_count=$((match_count + 1))
-            done < <(find release-assets -type f -name "$name" -print0)
-            if [[ "$match_count" -ne 1 ]]; then
-              echo "expected exactly one release artifact named ${name}, found ${match_count}" >&2
+            mapfile -d '' matches < <(find release-assets -type f -name "$name" -print0)
+            if [[ "${#matches[@]}" -ne 1 ]]; then
+              echo "expected exactly one release artifact named ${name}, found ${#matches[@]}" >&2
               exit 1
             fi
             if [[ ! -s "${matches[0]}" ]]; then

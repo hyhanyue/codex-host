@@ -5,14 +5,13 @@ import { pathToFileURL } from "node:url";
 
 import { NPM_PACKAGE_NAME, npmPlatformPackageName, npmTarballFileName } from "./prepare-npm.mjs";
 import { npmMetaTarballFileName } from "./prepare-npm-meta.mjs";
-import { resolveReleaseTargets, releaseTarget } from "./targets.mjs";
+import { supportedReleaseTargets, releaseTarget } from "./targets.mjs";
 
 const semverPattern = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/u;
 
 export function parseNpmPublishArguments(arguments_) {
   let artifactsRoot;
   let version;
-  let targets;
   let tag = "latest";
   let registry;
   let dryRun = false;
@@ -26,12 +25,7 @@ export function parseNpmPublishArguments(arguments_) {
     };
     if (argument === "--artifacts") artifactsRoot = readValue(argument);
     else if (argument.startsWith("--artifacts=")) artifactsRoot = argument.slice(12);
-    else if (argument === "--targets" || argument.startsWith("--targets=")) {
-      if (targets !== undefined) throw new Error("--targets may only be provided once");
-      targets = resolveReleaseTargets(
-        argument === "--targets" ? readValue(argument) : argument.slice("--targets=".length),
-      );
-    } else if (argument === "--version") version = readValue(argument);
+    else if (argument === "--version") version = readValue(argument);
     else if (argument.startsWith("--version=")) version = argument.slice(10);
     else if (argument === "--tag") tag = readValue(argument);
     else if (argument.startsWith("--tag=")) tag = argument.slice(6);
@@ -45,7 +39,7 @@ export function parseNpmPublishArguments(arguments_) {
   if (!artifactsRoot) throw new Error("--artifacts is required");
   if (!version || !semverPattern.test(version)) throw new Error("--version must be valid semver");
   if (!/^[0-9A-Za-z][0-9A-Za-z._-]*$/u.test(tag)) throw new Error("--tag is invalid");
-  return { artifactsRoot, dryRun, provenance, registry, tag, version, targets };
+  return { artifactsRoot, dryRun, provenance, registry, tag, version };
 }
 
 async function findTarballs(root, current = root) {
@@ -59,7 +53,7 @@ async function findTarballs(root, current = root) {
   return paths;
 }
 
-export async function createNpmPublishPlan({ artifactsRoot, version, targets }) {
+export async function createNpmPublishPlan({ artifactsRoot, version }) {
   const tarballs = await findTarballs(artifactsRoot);
   const locate = (fileName) => {
     const matches = tarballs.filter((tarball) => path.basename(tarball) === fileName);
@@ -67,7 +61,7 @@ export async function createNpmPublishPlan({ artifactsRoot, version, targets }) 
     if (matches.length > 1) throw new Error(`duplicate npm release tarball: ${fileName}`);
     return matches[0];
   };
-  const platforms = resolveReleaseTargets(targets).map((targetId) => {
+  const platforms = supportedReleaseTargets().map((targetId) => {
     const target = releaseTarget(targetId);
     return {
       kind: "platform",
@@ -76,7 +70,7 @@ export async function createNpmPublishPlan({ artifactsRoot, version, targets }) 
       version,
     };
   });
-  const plan = [
+  return [
     ...platforms,
     {
       kind: "meta",
@@ -85,12 +79,6 @@ export async function createNpmPublishPlan({ artifactsRoot, version, targets }) 
       version,
     },
   ];
-  const expected = new Set(plan.map((entry) => entry.tarball));
-  const unexpected = tarballs.filter((tarball) => !expected.has(tarball));
-  if (unexpected.length) {
-    throw new Error(`unexpected npm release tarball: ${unexpected.join(", ")}`);
-  }
-  return plan;
 }
 
 export function npmPublishCommand(entry, { dryRun, provenance, registry, tag }) {
@@ -123,7 +111,7 @@ export async function runNpmPublishCli(arguments_) {
   const parsed = parseNpmPublishArguments(arguments_);
   if (parsed.help) {
     console.log(
-      "usage: npm run release:npm:publish -- --artifacts <dir> --version <semver> [--tag <tag>] [--dry-run] [--provenance] [--registry <url>] [--targets <target,target,...>]",
+      "usage: npm run release:npm:publish -- --artifacts <dir> --version <semver> [--tag <tag>] [--dry-run] [--provenance] [--registry <url>]",
     );
     return;
   }

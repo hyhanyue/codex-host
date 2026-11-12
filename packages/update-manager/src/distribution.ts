@@ -34,7 +34,7 @@ export interface InstalledUpdateContext {
   metadata: DistributionMetadata;
   common: CommonUpdateOptions;
   installation:
-    | { kind: "npm"; options: Omit<NpmUpdateOptions, "metaArtifact" | "platformArtifact"> }
+    | { kind: "npm"; options: NpmUpdateOptions }
     | { kind: "windows-installer"; options: Omit<WindowsInstallerUpdateOptions, "artifact"> }
     | { kind: "macos-dmg"; options: Omit<MacOsDmgUpdateOptions, "artifact"> };
 }

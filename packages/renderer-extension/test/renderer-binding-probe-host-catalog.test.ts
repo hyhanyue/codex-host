@@ -7,7 +7,6 @@ import {
 import { afterEach, assert, describe, expect, it, vi } from "vitest";
 
 import type * as RendererComposerDom from "../src/renderer-composer-dom.js";
-import type { ComposerQuotaSources } from "../src/renderer-composer-quota.js";
 import {
   isRendererModelPickerDisabled,
   rendererModelSelectionFailed,
@@ -24,7 +23,6 @@ const testState = vi.hoisted(() => ({
   editor: null as unknown as Element,
   sendButton: null as unknown as HTMLButtonElement,
   renderedModelViews: [] as RendererModelControlView[],
-  quotaSources: undefined as ComposerQuotaSources | undefined,
   selectModel: null as null | ((modelId: string) => void),
   selectThinking: null as null | ((thinkingOptionId: string) => void),
   getConnectionDiagnostics: null as null | (() => RendererConnectionDiagnostics | null),
@@ -78,28 +76,20 @@ vi.mock("../src/renderer-composer-dom.js", async (importOriginal) => {
       };
     },
     renderComposerAgentControl: (
-      ...args: Parameters<typeof RendererComposerDom.renderComposerAgentControl>
+      _control: unknown,
+      _selection: unknown,
+      _adapter: unknown,
+      _switching: unknown,
+      _availability: unknown,
+      modelView: RendererModelControlView,
     ) => {
-      testState.renderedModelViews.push({ ...(args[5] ?? { status: "idle" }) });
-      testState.quotaSources = args[13];
+      testState.renderedModelViews.push({ ...modelView });
     },
     reconcileComposerNativeControls: vi.fn(),
     disposeComposerAgentControl: vi.fn(),
     sendButtonWithin: () => testState.sendButton,
   };
 });
-
-// These fixtures exercise Host catalog routing with synthetic elements. The
-// Composer routing panel's DOM and behavior are covered in Chromium.
-vi.mock("../src/renderer-composer-routing.js", () => ({
-  mountComposerRouting: () => ({
-    openHandoff: () => false,
-    configureDelegation: () => false,
-    sync: vi.fn(),
-    submit: () => false,
-    dispose: vi.fn(),
-  }),
-}));
 
 vi.mock("../src/versioned-renderer-adapter.js", async (importOriginal) => {
   const original = await importOriginal<typeof VersionedRendererAdapter>();
@@ -224,7 +214,6 @@ function installFakeBrowser(): void {
   testState.editor = editor;
   testState.sendButton = sendButton;
   testState.renderedModelViews = [];
-  testState.quotaSources = undefined;
   testState.selectModel = null;
   testState.selectThinking = null;
   testState.getConnectionDiagnostics = null;
@@ -301,57 +290,6 @@ afterEach(() => {
 });
 
 describe("Renderer binding Host-scoped Claude catalogs", () => {
-  it("uses the Host account sources and hides preinstalled adapters whose CLI is missing", async () => {
-    installFakeBrowser();
-    let kiroInstalled = false;
-    const host = {
-      listHarnessPlugins: async () => ({
-        plugins: ["kiro-cli", "claude-code", "antigravity"].map((id) => ({
-          id,
-          name: id,
-          version: "1",
-        })),
-      }),
-      listHarnessAccountSources: async () => ({
-        sources: [
-          { harnessId: "kiro-cli", harnessName: "Kiro CLI" },
-          { harnessId: "claude-code", harnessName: "Claude Code" },
-          { harnessId: "remote-only", harnessName: "Not on this Host" },
-        ],
-      }),
-      inspectHarnessAccount: vi.fn(),
-      inspectHarness: async ({ harnessId }: { harnessId: string }) =>
-        harnessId === "kiro-cli" && !kiroInstalled
-          ? { status: "notInstalled", error: { code: "notInstalled", message: "Missing CLI" } }
-          : readyInspection(),
-      inspectThread: async () => ({ owner: "codex", locked: true }),
-      inspectThreadUsage: async () => ({ threadId: "thread-a", usage: null }),
-    };
-    const { installRendererBindingProbe } = await import("../src/renderer-binding-probe.js");
-    const probe = installRendererBindingProbe({});
-    probe.setAdapter(
-      { state: "ready", reason: "ready", modelUpdates: 0, hook: "request-bridge" },
-      undefined,
-      undefined,
-      host as never,
-    );
-    try {
-      const codex = { id: "codex", label: "Codex" };
-      const claude = { id: "claude-code", label: "Claude Code" };
-      await vi.waitFor(() => expect(testState.quotaSources?.agents).toEqual([codex, claude]));
-      kiroInstalled = true;
-      await testState.getConnectionDiagnostics?.()?.refresh("local");
-      expect(testState.quotaSources?.agents).toEqual([
-        codex,
-        { id: "kiro-cli", label: "Kiro CLI" },
-        claude,
-      ]);
-      expect(host.inspectHarnessAccount).not.toHaveBeenCalled();
-    } finally {
-      probe.dispose();
-    }
-  });
-
   it("loads remote sidebar artwork before any Composer opens on that Host", async () => {
     installFakeBrowser();
     const plugin = harnessPluginDescriptorSchema.parse({

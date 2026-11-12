@@ -1,7 +1,9 @@
 import { execFile } from "node:child_process";
 import path from "node:path";
 
-import { findLatestGitHubRelease, type CodexhostLatestRelease } from "./github-release.js";
+import { parseLatestGitHubRelease, type CodexhostLatestRelease } from "./github-release.js";
+
+const GITHUB_LATEST_RELEASE_ENDPOINT = "repos/BytePioneer-AI/codex-host/releases/latest";
 const MAX_RELEASE_RESPONSE_BYTES = 1024 * 1024;
 const GITHUB_CLI_TIMEOUT_MS = 5_000;
 
@@ -72,13 +74,13 @@ function runGitHubCli(
 
 /**
  * Reads the public Release through GitHub CLI so its credential remains owned by
- * `gh` and the system keychain. Returns undefined when `gh` is unavailable or not
+ * `gh` and the system keychain. Returns null when `gh` is unavailable or not
  * authenticated (or fails), allowing callers to retain the anonymous HTTP fallback.
  * CLI stderr is never surfaced because debug output can contain credentials.
  */
 export async function fetchLatestGitHubReleaseWithGitHubCli(
   options: GitHubCliReleaseFetchOptions = {},
-): Promise<CodexhostLatestRelease | null | undefined> {
+): Promise<CodexhostLatestRelease | null> {
   const environment = options.environment ?? process.env;
   const platform = options.platform ?? process.platform;
   const candidates =
@@ -94,14 +96,15 @@ export async function fetchLatestGitHubReleaseWithGitHubCli(
     "Accept: application/vnd.github+json",
     "--header",
     "X-GitHub-Api-Version: 2022-11-28",
+    GITHUB_LATEST_RELEASE_ENDPOINT,
   ] as const;
 
   for (const executable of candidates) {
     options.signal?.throwIfAborted();
     try {
-      return await findLatestGitHubRelease(async (endpoint) =>
+      return parseLatestGitHubRelease(
         JSON.parse(
-          await run(executable, [...arguments_, endpoint], {
+          await run(executable, arguments_, {
             environment,
             ...(options.signal ? { signal: options.signal } : {}),
           }),
@@ -112,8 +115,8 @@ export async function fetchLatestGitHubReleaseWithGitHubCli(
       // Only try another install path when this executable could not be started.
       // Retrying authentication/network/parse failures would repeat the same request.
       const code = (error as NodeJS.ErrnoException | null)?.code;
-      if (code !== "ENOENT" && code !== "EACCES") return undefined;
+      if (code !== "ENOENT" && code !== "EACCES") return null;
     }
   }
-  return undefined;
+  return null;
 }

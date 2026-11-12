@@ -753,7 +753,7 @@ describe("Renderer Composer DOM behavior", () => {
 
     expect(placeUsage).toHaveBeenCalledWith(contextWrapper);
     expect(placeUsage).not.toHaveBeenCalledWith(modelRoot);
-    expect(placeCredits).toHaveBeenCalledWith(modelRoot);
+    expect(placeCredits).not.toHaveBeenCalled();
   });
 
   it("places Usage before the Model control when native Context is not ready", () => {
@@ -783,7 +783,7 @@ describe("Renderer Composer DOM behavior", () => {
     reconcileComposerNativeControls(control, true, false);
 
     expect(placeUsage).toHaveBeenCalledWith(modelRoot);
-    expect(placeCredits).toHaveBeenCalledWith(modelRoot);
+    expect(placeCredits).not.toHaveBeenCalled();
   });
 
   it.each([true, false])("anchors credits only in a verified permission slot (%s)", (verified) => {

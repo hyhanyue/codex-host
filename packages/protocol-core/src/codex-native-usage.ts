@@ -16,13 +16,12 @@ function finitePercent(value: unknown): number | undefined {
 }
 
 function optionalReset(value: unknown): number | undefined {
-  const seconds = nonNegativeSafeInteger(value);
-  return seconds !== undefined && seconds <= 8_640_000_000_000 ? seconds : undefined;
+  return nonNegativeSafeInteger(value);
 }
 
 interface RateLimitWindow {
   usedPercent: number;
-  windowDurationMins?: number;
+  windowDurationMins: number;
   resetsAt?: number;
 }
 
@@ -35,13 +34,11 @@ function parseRateLimitWindow(value: unknown): RateLimitWindow | null {
   if (!isRecord(value)) return null;
   const usedPercent = finitePercent(value.usedPercent);
   const windowDurationMins = nonNegativeSafeInteger(value.windowDurationMins);
-  if (usedPercent === undefined) return null;
+  if (usedPercent === undefined || windowDurationMins === undefined || windowDurationMins === 0) {
+    return null;
+  }
   const resetsAt = optionalReset(value.resetsAt);
-  return {
-    usedPercent,
-    ...(windowDurationMins ? { windowDurationMins } : {}),
-    ...(resetsAt !== undefined ? { resetsAt } : {}),
-  };
+  return { usedPercent, windowDurationMins, ...(resetsAt !== undefined ? { resetsAt } : {}) };
 }
 
 function parseRateLimitCandidate(
@@ -207,7 +204,18 @@ export function projectCodexRateLimitsToCredits(
             : {}),
         }
       : undefined;
-  const projectedResetCredits = projectResetCredits(resetCredits);
+  const projectedResetCredits =
+    resetCredits && resetCredits.availableCount > 0
+      ? {
+          availableCount: resetCredits.availableCount,
+          ...(resetCredits.nextExpiresAtUnix !== undefined
+            ? { nextExpiresAt: isoFromUnix(resetCredits.nextExpiresAtUnix) }
+            : {}),
+          ...(resetCredits.expiresAtUnix && resetCredits.expiresAtUnix.length > 0
+            ? { expiresAt: resetCredits.expiresAtUnix.map(isoFromUnix) }
+            : {}),
+        }
+      : undefined;
 
   return {
     usedPercent,
@@ -215,68 +223,5 @@ export function projectCodexRateLimitsToCredits(
     ...(resetsAtUnix !== undefined ? { resetsAt: isoFromUnix(resetsAtUnix) } : {}),
     ...(secondary ? { productUsage: [secondary] } : {}),
     ...(projectedResetCredits ? { resetCredits: projectedResetCredits } : {}),
-  };
-}
-
-function projectResetCredits(resetCredits?: CodexRateLimitResetCredits | null) {
-  if (!resetCredits || resetCredits.availableCount <= 0) return undefined;
-  return {
-    availableCount: resetCredits.availableCount,
-    ...(resetCredits.nextExpiresAtUnix !== undefined
-      ? { nextExpiresAt: isoFromUnix(resetCredits.nextExpiresAtUnix) }
-      : {}),
-    ...(resetCredits.expiresAtUnix?.length
-      ? { expiresAt: resetCredits.expiresAtUnix.map(isoFromUnix) }
-      : {}),
-  };
-}
-
-/** Keep every generic account window from a read, including new native durations. */
-export function projectCodexAccountQuota(
-  value: unknown,
-  resetCredits?: CodexRateLimitResetCredits | null,
-): AccountCreditsSnapshot | null {
-  const candidate = rateLimitCandidates(value)[0];
-  if (!candidate) return null;
-  const windows = [candidate.primary, candidate.secondary].filter(
-    (window): window is RateLimitWindow => window !== null,
-  );
-  const primary = windows.find((window) => window.windowDurationMins === 300) ?? windows[0];
-  if (!primary) return null;
-  const describe = (window: RateLimitWindow) => {
-    const minutes = window.windowDurationMins;
-    const periodType = minutes === 300 ? "five_hour" : minutes === 10_080 ? "seven_day" : "unknown";
-    const label =
-      minutes === undefined
-        ? undefined
-        : minutes % 1_440 === 0
-          ? `${minutes / 1_440}-day window`
-          : minutes % 60 === 0
-            ? `${minutes / 60}-hour window`
-            : `${minutes}-minute window`;
-    return {
-      label,
-      periodType,
-      ...(window.resetsAt !== undefined ? { resetsAt: isoFromUnix(window.resetsAt) } : {}),
-    } as const;
-  };
-  const { label, ...window } = describe(primary);
-  const others = windows
-    .filter((value) => value !== primary)
-    .map((value) => {
-      const { label: product, ...window } = describe(value);
-      return {
-        product: product ?? "Secondary account limit",
-        usagePercent: value.usedPercent,
-        ...window,
-      };
-    });
-  const resets = projectResetCredits(resetCredits);
-  return {
-    ...window,
-    usedPercent: primary.usedPercent,
-    ...(window.periodType === "unknown" && label ? { label } : {}),
-    ...(others.length ? { productUsage: others } : {}),
-    ...(resets ? { resetCredits: resets } : {}),
   };
 }

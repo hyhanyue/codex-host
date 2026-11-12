@@ -41,14 +41,8 @@ interface ParsedBucket extends AntigravityQuotaBucket {
 const USAGE_ARGUMENTS = ["--print=/usage", "--output-format", "stream-json"] as const;
 
 function usedPercentFrom(remainingFraction: unknown): number | null {
-  if (
-    typeof remainingFraction !== "number" ||
-    !Number.isFinite(remainingFraction) ||
-    remainingFraction < 0 ||
-    remainingFraction > 1
-  )
-    return null;
-  const used = (1 - remainingFraction) * 100;
+  if (typeof remainingFraction !== "number" || !Number.isFinite(remainingFraction)) return null;
+  const used = (1 - Math.min(1, Math.max(0, remainingFraction))) * 100;
   return Math.round(used * 100) / 100;
 }
 
@@ -88,13 +82,7 @@ function parseBuckets(groups: readonly unknown[]): ParsedBucket[] {
       const window = nonEmptyString(bucket.window) ?? "";
       const label = windowLabel(window, nonEmptyString(bucket.id));
       if (!label) continue;
-      const reset = nonEmptyString(bucket.reset_time);
-      const resetsAt =
-        reset &&
-        /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/u.test(reset) &&
-        Number.isFinite(Date.parse(reset))
-          ? reset
-          : undefined;
+      const resetsAt = nonEmptyString(bucket.reset_time);
       buckets.push({
         product: groupName ? `${groupName} · ${label}` : label,
         periodType: periodTypeFrom(window),
@@ -164,12 +152,17 @@ export function parseAntigravityUsageCommand(
   };
 }
 
-/** Runs `/usage`; returns null for a successful response without usable quota. */
+/** Runs `/usage` and returns the quota snapshot, or null when unavailable. */
 export async function fetchAntigravityQuota(
   run: AntigravityCommandRunner,
   now: Date = new Date(),
 ): Promise<AntigravityQuotaSnapshot | null> {
-  const stdout = await run(USAGE_ARGUMENTS);
+  let stdout: string;
+  try {
+    stdout = await run(USAGE_ARGUMENTS);
+  } catch {
+    return null;
+  }
   const fetchedAt = now.toISOString();
   for (const line of stdout.split(/\r?\n/u)) {
     const event = parseAntigravityStreamLine(line);

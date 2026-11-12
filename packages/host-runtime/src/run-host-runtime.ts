@@ -9,7 +9,6 @@ import { UPDATE_RUNTIME_ENV } from "@codexhost/update-manager";
 
 import { AppServerHost, officialEnvironment } from "./app-server-host.js";
 import { prepareLocalCodex } from "./native-account-host.js";
-import { DelegationCatalogStore } from "./delegation-catalog.js";
 import { SingleNativeCodexAccount } from "./account/codex-account-control.js";
 import { OfficialRuntimeScope } from "./codex-runtime/official-runtime-scope.js";
 import { createOwnedUnixBackend } from "./codex-runtime/owned-official-backends.js";
@@ -403,10 +402,6 @@ export async function runHostRuntime(input: {
         const shared = {
           officialRuntimeScope: official.officialRuntimeScope,
           accountControl: official.accountControl,
-          delegationCatalog: new DelegationCatalogStore(
-            delegationEnvironment,
-            official.officialRuntimeScope.permanentHome,
-          ),
         };
         if (!remoteControlPlan) {
           try {

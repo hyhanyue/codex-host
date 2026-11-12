@@ -8,9 +8,6 @@ import {
   LOADED_SESSIONS_METHOD,
   IDLE_RELEASE_SETTINGS_METHOD,
   USAGE_STATISTICS_METHOD,
-  COMPOSER_DELEGATE_METHOD,
-  HANDOFF_PREVIEW_METHOD,
-  HANDOFF_SEND_METHOD,
 } from "@codexhost/shared-contracts";
 import {
   storedSectionPlacementV1Schema,
@@ -178,10 +175,6 @@ export class SharedThreadBridge {
     let shared =
       (create !== null && create.selectedHarness !== "codex") ||
       (this.options.delegateCreates && request.method.startsWith("codexhost/harness/")) ||
-      (this.options.delegateCreates &&
-        (request.method === HANDOFF_PREVIEW_METHOD ||
-          request.method === HANDOFF_SEND_METHOD ||
-          (request.method === COMPOSER_DELEGATE_METHOD && params.harnessId !== "codex"))) ||
       this.handlesControl(request.method);
     if (!shared && typeof params.threadId === "string") {
       shared =

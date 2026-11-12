@@ -276,9 +276,7 @@ export class RuntimeMaintenance {
         throw new Error("Another remote update is already pending");
       return status;
     }
-    if (version !== status.installedVersion)
-      throw new Error("Install the verified Fork Release on the remote computer before restarting");
-    if (!status.restartRequired) return status;
+    if (version === status.installedVersion && !status.restartRequired) return status;
     this.#blocked = true;
     this.#update = { phase: "installing", targetVersion: version, error: null };
     try {
@@ -298,9 +296,10 @@ export class RuntimeMaintenance {
   async #launch(version: string): Promise<void> {
     // Recheck the installed version before launching the updater.
     const installed = await installation(this.options.runtimePath, this.options.environment);
-    if (!installed || version !== installed.version) {
+    if (!installed || compareSemanticVersions(version, installed.version) < 0) {
       throw new Error("The remote installation changed; refresh versions before retrying");
     }
+    const restartOnly = version === installed.version;
     const resources = await this.#resources();
     if (!resources) throw new Error("Remote updater is unavailable");
     const directory = path.dirname(this.#statusPath);
@@ -318,7 +317,7 @@ export class RuntimeMaintenance {
       JSON.stringify({
         version,
         installedVersion: installed.version,
-        restartOnly: true,
+        restartOnly,
         node: resources.node,
         npm: resources.npm,
         launcher: resources.launcher,

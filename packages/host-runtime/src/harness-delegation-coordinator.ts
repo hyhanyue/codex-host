@@ -152,12 +152,7 @@ export class HarnessDelegationCoordinator {
   readonly #sendOfficial: (input: ThreadSendInput) => Promise<ThreadSendResult>;
   readonly #cancelOfficial: (input: ThreadCancelInput) => Promise<ThreadCancelResult>;
   readonly #startOfficial: (
-    input: DelegationStartInput & {
-      parentThreadId: string;
-      cwd: string;
-      title: string;
-      interactive?: boolean;
-    },
+    input: DelegationStartInput & { parentThreadId: string; cwd: string; title: string },
   ) => Promise<DelegationStartResult>;
   readonly #listOfficial: (input: ThreadListInput) => Promise<DelegationThreadListResult>;
   readonly #officialThreadMetadata: (threadId: string) => Promise<ParentMetadata>;
@@ -186,12 +181,7 @@ export class HarnessDelegationCoordinator {
     sendOfficial(input: ThreadSendInput): Promise<ThreadSendResult>;
     cancelOfficial(input: ThreadCancelInput): Promise<ThreadCancelResult>;
     startOfficial(
-      input: DelegationStartInput & {
-        parentThreadId: string;
-        cwd: string;
-        title: string;
-        interactive?: boolean;
-      },
+      input: DelegationStartInput & { parentThreadId: string; cwd: string; title: string },
     ): Promise<DelegationStartResult>;
     listOfficial(input: ThreadListInput): Promise<DelegationThreadListResult>;
     officialThreadMetadata(threadId: string): Promise<ParentMetadata>;
@@ -239,10 +229,7 @@ export class HarnessDelegationCoordinator {
     };
   }
 
-  async start(
-    input: DelegationStartInput,
-    { interactive = false }: { interactive?: boolean } = {},
-  ): Promise<DelegationStartResult> {
+  async start(input: DelegationStartInput): Promise<DelegationStartResult> {
     validateStart(input);
     // An external client has no workspace of its own for the child to inherit.
     if (originClientName(input.parentThreadId) && !input.cwd)
@@ -252,9 +239,6 @@ export class HarnessDelegationCoordinator {
       );
     const parentThreadId = await this.#resolveParent(input.parentThreadId);
     const parent = await this.#parentMetadata(parentThreadId);
-    if (interactive && !parent.cwd && !input.cwd) {
-      throw new DelegationControlError("THREAD_NOT_FOUND", "Parent workspace could not be read");
-    }
     const selectedCwd = input.cwd ?? parent.cwd ?? process.cwd();
     const title = delegationTitle(parent.title, input);
     if (input.harnessId === "codex") {
@@ -263,7 +247,6 @@ export class HarnessDelegationCoordinator {
         parentThreadId,
         cwd: selectedCwd,
         title,
-        ...(interactive ? { interactive } : {}),
       });
       return {
         ...result,
@@ -273,6 +256,13 @@ export class HarnessDelegationCoordinator {
       };
     }
     const startInput = { ...input, parentThreadId, cwd: path.resolve(selectedCwd) };
+    if (!this.#adapters.has(input.harnessId)) {
+      throw new DelegationControlError(
+        "HARNESS_NOT_FOUND",
+        `Harness '${input.harnessId}' is unavailable`,
+        { validHarnessIds: ["codex", ...this.#adapters.keys()] },
+      );
+    }
     const targetHarnessId = input.harnessId as ExternalHarnessId;
     const digest = taskDigest(startInput);
     const duplicate = input.requestId
@@ -286,9 +276,7 @@ export class HarnessDelegationCoordinator {
     if (
       duplicate &&
       input.requestId &&
-      (duplicate.parentHostThreadId !== parentThreadId ||
-        duplicate.targetHarnessId !== targetHarnessId ||
-        duplicate.taskDigest !== digest)
+      (duplicate.targetHarnessId !== targetHarnessId || duplicate.taskDigest !== digest)
     ) {
       throw new DelegationControlError(
         "INVALID_ARGUMENT",
@@ -297,47 +285,6 @@ export class HarnessDelegationCoordinator {
     }
     if (duplicate) return this.#existingResult(duplicate);
 
-    const delegationId = hostThreadIdSchema.parse(randomUUID());
-    const started = await this.#openExternalConversation(startInput, title, interactive, {
-      delegationId,
-      parentThreadId,
-      sourceHarnessId: parent.harnessId,
-      taskDigest: digest,
-    });
-    return {
-      ...this.#result(
-        delegationId,
-        started.threadId,
-        started.turnId,
-        targetHarnessId,
-        "running",
-        started.configuration,
-      ),
-      cwd: started.cwd,
-      title: started.title,
-      parentThreadId,
-    };
-  }
-
-  async startExternalDraft(input: DelegationStartInput & { cwd: string }): Promise<string> {
-    validateStart(input);
-    const title = truncateTitle(input.task.trim().replace(/\s+/gu, " "), 120);
-    const started = await this.#openExternalConversation(input, title, true);
-    return started.threadId;
-  }
-
-  async #openExternalConversation(
-    input: DelegationStartInput & { cwd: string },
-    title: string,
-    interactive: boolean,
-    parent?: {
-      delegationId: string;
-      parentThreadId: string;
-      sourceHarnessId: string;
-      taskDigest: string;
-    },
-  ) {
-    const targetHarnessId = input.harnessId as ExternalHarnessId;
     const adapter = this.#adapters.get(targetHarnessId);
     if (!adapter) {
       throw new DelegationControlError(
@@ -351,11 +298,11 @@ export class HarnessDelegationCoordinator {
     if (input.model || input.thinkingOptionId) {
       const inspected = await this.inspect({
         harnessId: targetHarnessId,
-        cwd: input.cwd,
-        ...(interactive ? { refresh: true } : {}),
+        cwd: startInput.cwd,
       });
       this.#validateConfiguration(inspected.inspection, input.model, input.thinkingOptionId);
     }
+    const delegationId = hostThreadIdSchema.parse(randomUUID());
     const childThreadId = hostThreadIdSchema.parse(randomUUID());
     const turnId = hostTurnIdSchema.parse(randomUUID());
     const createRequestId = input.requestId ? `delegation:${input.requestId}` : randomUUID();
@@ -364,7 +311,7 @@ export class HarnessDelegationCoordinator {
         hostThreadId: childThreadId,
         createRequestId,
         harnessId: harnessIdSchema.parse(targetHarnessId),
-        cwd: input.cwd,
+        cwd: startInput.cwd,
         title,
         transportModelId:
           input.model || input.thinkingOptionId
@@ -381,25 +328,21 @@ export class HarnessDelegationCoordinator {
     let session: HarnessSession | null = null;
     return this.#externalRuntime.idleRelease.runOperation(childThreadId, async () => {
       try {
-        if (parent) {
-          delegation = await this.#repository.createDelegation({
-            delegationId: hostThreadIdSchema.parse(parent.delegationId),
-            parentHostThreadId: hostThreadIdSchema.parse(parent.parentThreadId),
-            childHostThreadId: childThreadId,
-            sourceHarnessId: harnessIdSchema.parse(parent.sourceHarnessId),
-            targetHarnessId: harnessIdSchema.parse(targetHarnessId),
-            status: "creating",
-            ...(input.requestId ? { requestId: input.requestId } : {}),
-            taskDigest: parent.taskDigest,
-          });
-        }
+        delegation = await this.#repository.createDelegation({
+          delegationId,
+          parentHostThreadId: hostThreadIdSchema.parse(parentThreadId),
+          childHostThreadId: childThreadId,
+          sourceHarnessId: harnessIdSchema.parse(parent.harnessId),
+          targetHarnessId: harnessIdSchema.parse(targetHarnessId),
+          status: "creating",
+          ...(input.requestId ? { requestId: input.requestId } : {}),
+          taskDigest: digest,
+        });
         const opened = await adapter.open({
           kind: "create",
           cwd: record.cwd,
           environment: { ...this.#environment, [DELEGATION_THREAD_ID_ENV]: childThreadId },
-          ...(interactive
-            ? { requireExactConfiguration: Boolean(input.model || input.thinkingOptionId) }
-            : { executionPolicy: "unattended-full-access" as const }),
+          executionPolicy: "unattended-full-access",
           ...(input.model ? { model: input.model } : {}),
           ...(input.thinkingOptionId ? { thinkingOptionId: input.thinkingOptionId } : {}),
         });
@@ -463,14 +406,10 @@ export class HarnessDelegationCoordinator {
             running: thread.running,
           });
         }
-        if (delegation)
-          await this.#repository.setDelegationStatus(delegation.delegationId, "running");
+        await this.#repository.setDelegationStatus(delegationId, "running");
         await this.#notifyThreadStarted(thread.thread);
         return {
-          threadId: childThreadId,
-          turnId,
-          cwd: record.cwd,
-          configuration: {
+          ...this.#result(delegationId, childThreadId, turnId, targetHarnessId, "running", {
             requested: {
               ...(input.model ? { model: input.model } : {}),
               ...(input.thinkingOptionId ? { thinkingOptionId: input.thinkingOptionId } : {}),
@@ -488,8 +427,10 @@ export class HarnessDelegationCoordinator {
                   }
                 : {}),
             },
-          },
+          }),
+          cwd: record.cwd,
           title: record.title,
+          parentThreadId,
         };
       } catch (error) {
         if (session) await session.close().catch(() => undefined);

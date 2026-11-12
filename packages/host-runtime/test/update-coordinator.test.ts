@@ -138,25 +138,12 @@ async function macFixture(): Promise<{
   return { root, hostRuntimePath, environment };
 }
 
-const npmBytes = Buffer.from("Fork npm package");
-async function downloadNpm(source: { url: string }, destination: string) {
-  await writeFile(destination, npmBytes);
-  return { bytes: npmBytes.length, finalUrl: source.url };
-}
-
-function release(version = "1.2.3", target = "macos-arm64"): CodexhostLatestRelease {
+function release(version = "1.2.3"): CodexhostLatestRelease {
   return {
     version,
     releaseNotes: `Release ${version}`,
-    releaseNotesUrl: `https://github.com/hyhanyue/codex-host/releases/tag/v${version}`,
-    assets: [`codexhost-cli-${version}.tgz`, `codexhost-cli-${version}-${target}.tgz`].map(
-      (name) => ({
-        name,
-        size: npmBytes.length,
-        digest: `sha256:${digest(npmBytes)}`,
-        downloadUrl: `https://github.com/hyhanyue/codex-host/releases/download/v${version}/${name}`,
-      }),
-    ),
+    releaseNotesUrl: `https://github.com/BytePioneer-AI/codex-host/releases/tag/v${version}`,
+    assets: [],
   };
 }
 
@@ -172,11 +159,7 @@ describe("Host update coordinator", () => {
       };
       delete environment.CODEXHOST_CONTROL_PORT;
       delete environment.CODEXHOST_CONTROL_NONCE;
-      const actual = createBackgroundUpdateManager({
-        platform,
-        randomId: () => "service",
-        download: downloadNpm,
-      });
+      const actual = createBackgroundUpdateManager({ platform, randomId: () => "service" });
       const manager = {
         ...actual,
         prepareNpm: vi.fn(actual.prepareNpm),
@@ -188,15 +171,7 @@ describe("Host update coordinator", () => {
         platform,
         architecture: platform === "darwin" ? "arm64" : "x64",
         manager,
-        fetchLatest: async () =>
-          release(
-            "1.2.3",
-            platform === "darwin"
-              ? "macos-arm64"
-              : platform === "win32"
-                ? "windows-x64"
-                : "linux-x64",
-          ),
+        fetchLatest: async () => release(),
       });
       await expect(coordinator.check()).resolves.toMatchObject({
         installationAvailable: true,
@@ -224,7 +199,7 @@ describe("Host update coordinator", () => {
     "prefers gh and only falls back when needed (CLI available: %s)",
     async (available) => {
       const fixture = await npmFixture();
-      discovery.cli.mockResolvedValue(available ? release() : undefined);
+      discovery.cli.mockResolvedValue(available ? release() : null);
       discovery.http.mockResolvedValue(release());
       const coordinator = createHostUpdateCoordinator({
         ...fixture,
@@ -271,7 +246,6 @@ describe("Host update coordinator", () => {
     const manager = createBackgroundUpdateManager({
       platform: "darwin",
       randomId: () => "one",
-      download: downloadNpm,
       spawnUpdater,
       now: () => 10_000,
     });
@@ -292,10 +266,10 @@ describe("Host update coordinator", () => {
       installationAvailable: true,
     });
     await expect(coordinator.start()).resolves.toMatchObject({
-      status: { version: "1.2.3", installation: "npm" },
+      status: { version: "1.2.3", installation: "npm", phase: "prepared" },
     });
     await expect(coordinator.start()).resolves.toMatchObject({
-      status: { version: "1.2.3" },
+      status: { version: "1.2.3", phase: "prepared" },
     });
     const home = fixture.environment.HOME;
     if (!home) throw new Error("fixture HOME is missing");
@@ -320,7 +294,6 @@ describe("Host update coordinator", () => {
     const manager = createBackgroundUpdateManager({
       platform: "win32",
       randomId: () => "one",
-      download: downloadNpm,
       spawnUpdater,
       now: () => 10_000,
     });
@@ -330,11 +303,11 @@ describe("Host update coordinator", () => {
       platform: "win32",
       architecture: "x64",
       manager,
-      fetchLatest: async () => release("1.2.3", "windows-x64"),
+      fetchLatest: async () => release(),
     });
 
     await expect(coordinator.start()).resolves.toMatchObject({
-      status: { version: "1.2.3", installation: "npm" },
+      status: { version: "1.2.3", installation: "npm", phase: "prepared" },
     });
     const localAppData = fixture.environment.LOCALAPPDATA;
     if (!localAppData) throw new Error("fixture LOCALAPPDATA is missing");
@@ -381,14 +354,14 @@ describe("Host update coordinator", () => {
       fetchLatest: async () => ({
         version: "1.2.3",
         releaseNotes: "Release 1.2.3",
-        releaseNotesUrl: "https://github.com/hyhanyue/codex-host/releases/tag/v1.2.3",
+        releaseNotesUrl: "https://github.com/BytePioneer-AI/codex-host/releases/tag/v1.2.3",
         assets: [
           {
             name: "codexhost-1.2.3-macos-arm64.dmg",
             size: bytes.length,
             digest: `sha256:${digest(bytes)}`,
             downloadUrl:
-              "https://github.com/hyhanyue/codex-host/releases/download/v1.2.3/codexhost-1.2.3-macos-arm64.dmg",
+              "https://github.com/BytePioneer-AI/codex-host/releases/download/v1.2.3/codexhost-1.2.3-macos-arm64.dmg",
           },
         ],
       }),

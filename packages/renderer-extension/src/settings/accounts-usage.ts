@@ -215,7 +215,7 @@ function renderUsageWindow(
   const reset = window.resetsAt
     ? renderAccountResetTime(document, window.resetsAt, messages)
     : null;
-  if (reset?.countdown) percent.append(reset.countdown);
+  if (reset) percent.append(reset.countdown);
   percent.append(number);
   const bar = document.createElement("div");
   bar.className = `settings-account-usage__bar settings-account-usage__bar--${tone}`;

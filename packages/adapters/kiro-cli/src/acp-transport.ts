@@ -282,41 +282,16 @@ export class KiroAcpTransport {
     return this.#stderrTail;
   }
 
-  #supportsConfigTemplate(initialize: InitializeResponse): boolean {
-    const kiro = initialize.agentCapabilities?._meta?.kiro;
-    return (
-      isRecord(kiro) &&
-      Array.isArray(kiro.extensionMethods) &&
-      kiro.extensionMethods.includes("_kiro/config/template")
-    );
-  }
-
-  async #readConfigTemplate(connection: ClientSideConnection, modelId?: string) {
-    const deadline = Date.now() + this.#commandTimeoutMs;
-    while (Date.now() < deadline) {
-      const template = await withTimeout(
-        connection.request("_kiro/config/template", {}),
-        Math.max(1, deadline - Date.now()),
-        "Kiro configuration discovery",
-      );
-      const catalog = parseKiroModelCatalog(
-        isRecord(template) ? template.configOptions : undefined,
-      );
-      if (
-        modelId ? catalog.models.some(({ ref }) => ref.id === modelId) : catalog.models.length > 0
-      ) {
-        return catalog;
-      }
-      await delay(Math.min(250, Math.max(0, deadline - Date.now())));
-    }
-    throw new KiroTransportError("unavailable", "Kiro returned no native model catalog");
-  }
-
   async inspect(): Promise<unknown> {
     if (this.#sessionId) throw new Error("Kiro ACP inspection cannot reuse an open Session");
     try {
       const initialize = await this.#ensureInitialized();
-      if (this.#supportsConfigTemplate(initialize)) {
+      const kiro = initialize.agentCapabilities?._meta?.kiro;
+      if (
+        isRecord(kiro) &&
+        Array.isArray(kiro.extensionMethods) &&
+        kiro.extensionMethods.includes("_kiro/config/template")
+      ) {
         const connection = this.#connection;
         const method = initialize.authMethods?.[0];
         if (!connection || !method) {
@@ -332,7 +307,20 @@ export class KiroAcpTransport {
         );
         // Authentication starts an asynchronous catalog refresh. The template is
         // session-free and preserves effort metadata omitted by CLI --list-models.
-        return { ...initialize, catalog: await this.#readConfigTemplate(connection) };
+        const deadline = Date.now() + this.#commandTimeoutMs;
+        while (Date.now() < deadline) {
+          const template = await withTimeout(
+            connection.request("_kiro/config/template", {}),
+            Math.max(1, deadline - Date.now()),
+            "Kiro configuration discovery",
+          );
+          const catalog = parseKiroModelCatalog(
+            isRecord(template) ? template.configOptions : undefined,
+          );
+          if (catalog.models.length > 0) return { ...initialize, catalog };
+          await delay(Math.min(250, Math.max(0, deadline - Date.now())));
+        }
+        throw new KiroTransportError("unavailable", "Kiro returned no native model catalog");
       }
       const environment = { ...process.env, ...this.#options.environment };
       const executable = resolveKiroExecutable({
@@ -374,6 +362,7 @@ export class KiroAcpTransport {
 
       let session: NewSessionResponse | LoadSessionResponse;
       let sessionId: string;
+      let configOptions: unknown[] | undefined;
 
       if (input.kind === "create") {
         const created = await withTimeout(
@@ -386,12 +375,30 @@ export class KiroAcpTransport {
         );
         session = created;
         sessionId = created.sessionId;
+        configOptions = (created as { configOptions?: unknown[] }).configOptions;
 
         if (input.modeId) {
           await withTimeout(
             connection.setSessionMode({ sessionId, modeId: input.modeId }),
             this.#commandTimeoutMs,
             "Kiro initial mode",
+          );
+        }
+        // Apply initial config options if provided
+        if (input.modelId) {
+          configOptions = await this.#setConfigOptionOnSession(
+            connection,
+            sessionId,
+            "model",
+            input.modelId,
+          );
+        }
+        if (input.autopilot) {
+          configOptions = await this.#setConfigOptionOnSession(
+            connection,
+            sessionId,
+            "autopilot",
+            input.autopilot,
           );
         }
       } else if (input.kind === "fork" || input.kind === "rollbackLastTurn") {
@@ -411,6 +418,25 @@ export class KiroAcpTransport {
           this.#commandTimeoutMs,
           "Kiro Fork Session load",
         );
+        configOptions = (session as { configOptions?: unknown[] }).configOptions;
+
+        // Crucial: Child session resets config to defaults; restore model and autopilot!
+        if (input.modelId) {
+          configOptions = await this.#setConfigOptionOnSession(
+            connection,
+            sessionId,
+            "model",
+            input.modelId,
+          );
+        }
+        if (input.autopilot) {
+          configOptions = await this.#setConfigOptionOnSession(
+            connection,
+            sessionId,
+            "autopilot",
+            input.autopilot,
+          );
+        }
       } else {
         session = await withTimeout(
           connection.loadSession({
@@ -422,48 +448,33 @@ export class KiroAcpTransport {
           "Kiro Session load",
         );
         sessionId = input.sessionId;
+        configOptions = (session as { configOptions?: unknown[] }).configOptions;
+
+        if (input.modelId) {
+          configOptions = await this.#setConfigOptionOnSession(
+            connection,
+            sessionId,
+            "model",
+            input.modelId,
+          );
+        }
+        if (input.autopilot) {
+          configOptions = await this.#setConfigOptionOnSession(
+            connection,
+            sessionId,
+            "autopilot",
+            input.autopilot,
+          );
+        }
       }
 
       if (typeof sessionId !== "string" || sessionId.length === 0) {
         throw new KiroTransportError("protocolError", "Kiro ACP returned no Session identity");
       }
 
-      const initialOptions = (session as { configOptions?: unknown[] }).configOptions;
-      let configOptions = initialOptions;
-      if (input.modelId) {
-        configOptions = await this.#setConfigOptionOnSession(
-          connection,
-          sessionId,
-          "model",
-          input.modelId,
-        );
-      }
-      if (input.autopilot) {
-        configOptions = await this.#setConfigOptionOnSession(
-          connection,
-          sessionId,
-          "autopilot",
-          input.autopilot,
-        );
-      }
-
       if (input.effortLevel !== undefined) {
-        let available: readonly string[] =
-          kiroThinkingState(configOptions).availableThinkingOptions?.map(({ id }) => id) ?? [];
-        if (available.length === 0) {
-          const currentCatalog = parseKiroModelCatalog(configOptions);
-          const modelId = input.modelId ?? currentCatalog.defaultModel?.id;
-          const effortForModel = (catalog: typeof currentCatalog) =>
-            catalog.models.find(({ ref }) => ref.id === modelId)?.supportedThinkingOptionIds ?? [];
-          available = effortForModel(currentCatalog);
-          if (available.length === 0)
-            available = effortForModel(parseKiroModelCatalog(initialOptions));
-          // Session replies can omit model metadata as well as the Effort option.
-          if (available.length === 0 && modelId && this.#supportsConfigTemplate(initialize)) {
-            available = effortForModel(await this.#readConfigTemplate(connection, modelId));
-          }
-        }
-        if (!available.includes(input.effortLevel)) {
+        const available = kiroThinkingState(configOptions).availableThinkingOptions ?? [];
+        if (!available.some(({ id }) => id === input.effortLevel)) {
           throw new KiroTransportError(
             available.length === 0 ? "unsupported" : "invalidRequest",
             "The current Kiro model does not support the requested effort level",

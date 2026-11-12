@@ -48,43 +48,6 @@ const { outputFiles } = await build({
         credits.place(plus);
         renderRendererUsageControl(usage, null);
         renderRendererCreditsControl(credits, null);
-        const quotaClient = {};
-        let quotaRefreshes = 0;
-        globalThis.showAgentQuota = (current, accountKey = "account") => {
-          renderRendererCreditsControl(credits, null, "zh-CN", {
-            client: quotaClient,
-            accountKey,
-            current,
-            agents: [
-              { id: "codex", label: "Codex" },
-              { id: "kiro-cli", label: "Kiro CLI" },
-              { id: "antigravity", label: "Antigravity CLI" },
-            ],
-            async read(agent, refresh) {
-              if (refresh) quotaRefreshes += 1;
-              if (agent === "kiro-cli") {
-                return refresh ? { status: "authenticationRequired" } : {
-                  status: "ready", plan: "KIRO PRO", credits: {
-                    periodType: "monthly", usedPercent: 62.257, used: 622.57, limit: 1000,
-                    unit: "credits", resetsAt: "2026-12-01",
-                  },
-                };
-              }
-              if (agent === "antigravity") return {
-                status: "ready", credits: {
-                  scope: { id: "gemini", label: "Gemini Models" },
-                  periodType: "five_hour", usedPercent: 0,
-                  productUsage: [{ scope: { id: "third-party", label: "Claude and GPT models" },
-                    product: "Weekly window", periodType: "weekly", usagePercent: 84.4 }],
-                },
-              };
-              return accountKey === "account" ? {
-                status: "ready", credits: { periodType: "seven_day", usedPercent: 43 },
-              } : { status: "empty" };
-            },
-          });
-        };
-        globalThis.quotaRefreshes = () => quotaRefreshes;
         globalThis.updateRendererUsage = () => {
           renderRendererUsageControl(usage, {
             cacheHitRatePercent: 99.9,
@@ -695,49 +658,4 @@ test("shows Copilot generation/API rates and known-zero cache rates", async ({ p
   await expect(popover).toContainText("API 平均速度42.5 tok/s");
   await expect(popover).toContainText("最近缓存命中（CH）0%");
   await expect(popover).toContainText("平均缓存命中0%");
-});
-
-test("shows the current Agent and inspects other native quota sources in the same panel", async ({
-  page,
-}) => {
-  await page.setViewportSize({ width: 520, height: 420 });
-  await page.setContent('<main style="position:fixed;bottom:24px;left:40px"></main>');
-  await page.addScriptTag({ content: outputFiles[0]?.text ?? "" });
-  await page.evaluate(() => {
-    Reflect.get(globalThis, "setupRendererUsage")();
-    const toolbar = document.querySelector("[data-codexhost-credits-control]")?.parentElement;
-    if (toolbar) document.querySelector("main")?.append(toolbar);
-    Reflect.get(globalThis, "showAgentQuota")("codex");
-  });
-  const chip = page.locator('[data-codexhost-credits-control="usage-composer"]');
-  const panel = page.locator("#usage-composer-credits-popover");
-  await expect(chip).toHaveText("57%");
-  await chip.locator("button").click();
-  await expect(panel).toContainText("7 天额度");
-  await panel.getByRole("button", { name: "Kiro CLI" }).click();
-  await expect(panel).toContainText("377.43 / 1,000 credits");
-  await expect(panel).toContainText("12月1日 重置");
-  await expect(panel).not.toContainText(/\d{1,2}:\d{2}/u);
-  await expect(chip).toHaveText("57%");
-  await panel.getByRole("button", { name: "刷新额度" }).click();
-  await expect(panel).toContainText("请登录此 Agent 后查看额度");
-  await expect(panel).not.toContainText("377.43");
-  expect(await page.evaluate(() => Reflect.get(globalThis, "quotaRefreshes")())).toBe(1);
-
-  await panel.getByRole("button", { name: "Antigravity CLI" }).click();
-  await expect(panel).toContainText("Gemini Models · 5 小时额度");
-  await expect(panel).toContainText("Claude and GPT models · 周额度");
-  await expect(panel.locator("[data-codexhost-credits-bar]")).toHaveCount(2);
-  await page.evaluate(() => Reflect.get(globalThis, "showAgentQuota")("codex", "changed"));
-  await expect(panel).toContainText("暂无额度数据");
-  await expect(chip).toHaveText("—");
-  await expect(panel.locator("[data-codexhost-credits-bar]")).toHaveCount(0);
-
-  await page.evaluate(() => Reflect.get(globalThis, "showAgentQuota")("kiro-cli", "changed"));
-  await expect(chip).toHaveText("38%");
-  await expect(panel.getByRole("button", { name: "Kiro CLI" })).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  );
-  await expect(panel).toContainText("377.43 / 1,000 credits");
 });

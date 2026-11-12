@@ -6,7 +6,6 @@ export function formatAccountResetCountdown(
   messages: RendererSettingsMessages,
   now = Date.now(),
 ): { text: string; description: string } | null {
-  if (/^\d{4}-\d{2}-\d{2}$/u.test(value)) return null;
   const timestamp = Date.parse(value);
   if (!Number.isFinite(timestamp)) return null;
   const minutes = Math.max(0, Math.ceil((timestamp - now) / 60_000));
@@ -48,26 +47,15 @@ export function renderAccountResetTime(
   document: Document,
   value: string,
   messages: RendererSettingsMessages,
-): { countdown?: HTMLElement; timestamp: HTMLTimeElement } | null {
+): { countdown: HTMLElement; timestamp: HTMLTimeElement } | null {
   const date = new Date(value);
   if (!Number.isFinite(date.getTime())) return null;
-  const timestamp = document.createElement("time");
-  timestamp.className = "settings-account-usage__sub";
-  if (/^\d{4}-\d{2}-\d{2}$/u.test(value)) {
-    timestamp.dateTime = value;
-    timestamp.textContent = date.toLocaleDateString(messages.locale, {
-      month: "long",
-      day: "numeric",
-      timeZone: "UTC",
-    });
-    timestamp.title = messages.accountCreditsResetAt.replace("{time}", timestamp.textContent);
-    timestamp.setAttribute("aria-label", timestamp.title);
-    return { timestamp };
-  }
   const countdown = document.createElement("span");
   countdown.className = "settings-account-usage__countdown";
   countdown.dataset.resetsAt = date.toISOString();
   updateCountdown(countdown, messages);
+  const timestamp = document.createElement("time");
+  timestamp.className = "settings-account-usage__sub";
   timestamp.dateTime = date.toISOString();
   const pad = (number: number): string => String(number).padStart(2, "0");
   timestamp.textContent = `${pad(date.getMonth() + 1)}/${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;

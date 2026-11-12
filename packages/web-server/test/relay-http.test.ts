@@ -21,8 +21,7 @@ async function fixture(t: TestContext, certificate = true) {
     reply(503, { detail: "test CA unavailable" });
     return true;
   });
-  // Use the production heartbeat so CI scheduling cannot preempt the TLS deadline.
-  const relay = await startRelay(t, 25_000);
+  const relay = await startRelay(t);
   const data = relayData(t);
   const hostname = `${relayIdentity(data).id}.relay.test`;
   if (certificate) {

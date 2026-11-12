@@ -31,7 +31,6 @@ import {
   storedThreadMetadataV1Schema,
   storedThreadRecordV1Schema,
   type CommitReadyThreadInput,
-  type CommitThreadHandoffInput,
   type CreateDelegationInput,
   type CreateProvisionalThreadInput,
   type DelegationStatus,
@@ -702,75 +701,6 @@ export class MappingStore {
     });
     if (!result) throw new MappingStoreError("IO_ERROR", "Provisional create produced no result");
     return result;
-  }
-
-  /** Publish the new route and the frozen earlier timeline in the same atomic record write. */
-  async commitThreadHandoff(input: CommitThreadHandoffInput): Promise<StoredThreadRecordV1> {
-    this.#requireInitialized();
-    const {
-      expectedRevision,
-      hostThreadId,
-      createRequestId,
-      harnessId,
-      nativeSessionRef,
-      cwd,
-      title,
-      transportModelId,
-      ephemeral,
-      historyMode,
-      createdAt,
-      projectId,
-      handoff,
-    } = input;
-    const current = this.#records.get(hostThreadId);
-    const route = {
-      harnessId,
-      nativeSessionRef,
-      transportModelId,
-      handoff,
-      state: "ready" as const,
-      turnMappings: [],
-    };
-    if (expectedRevision !== null) {
-      const replaced = await this.#update(hostThreadId, (record) => {
-        if (record.revision !== expectedRevision || record.cwd !== cwd || record.subagent) {
-          throw new MappingStoreError("MAPPING_CONFLICT", "Thread changed before handoff");
-        }
-        return { ...record, ...route };
-      });
-      if (current?.nativeSessionRef)
-        await this.#recordSuperseded(current.nativeSessionRef, replaced);
-      return replaced;
-    }
-
-    const record = storedThreadRecordV1Schema.parse({
-      ...route,
-      formatVersion: 1,
-      revision: 1,
-      hostThreadId,
-      createRequestId,
-      cwd,
-      title: title ?? "",
-      archived: false,
-      ephemeral,
-      historyMode,
-      createdAt,
-      updatedAt: this.#now().toISOString(),
-      ...(projectId ? { projectId } : {}),
-    });
-    await this.#enqueue(async () => {
-      if (this.#records.has(hostThreadId))
-        throw new MappingStoreError("DUPLICATE_THREAD_ID", "Thread changed before handoff");
-      const metadata = threadMetadataOf(record);
-      if (projectId) await this.#writeMetadataFile(hostThreadId, metadata);
-      try {
-        await this.#writeNew(record);
-      } catch (error) {
-        if (projectId) await rm(this.#metadataPath(hostThreadId), { force: true });
-        throw error;
-      }
-    });
-    return cloneRecord(record);
   }
 
   async commitReady(input: CommitReadyThreadInput): Promise<StoredThreadRecordV1> {

@@ -14,8 +14,8 @@ const status = (version: string, changes: Partial<RuntimeStatus> = {}): RuntimeS
   ...changes,
 });
 describe("remote version policy", () => {
-  it("does not offer a package change based on version differences", () => {
-    expect(remoteUpdateTarget(status("0.11.0"), status("0.9.0"))).toBeNull();
+  it("updates older versions but never downgrades a newer remote", () => {
+    expect(remoteUpdateTarget(status("0.11.0"), status("0.9.0"))).toBe("0.11.0");
     expect(remoteUpdateTarget(status("0.9.0"), status("0.11.0"))).toBeNull();
   });
   it("restarts changed files at the same version and leaves matching services alone", () => {

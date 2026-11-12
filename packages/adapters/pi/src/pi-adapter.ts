@@ -406,7 +406,6 @@ class PiHarnessSession implements HarnessSession {
   readonly #onClosed: () => void;
   readonly #requestedModel: HarnessModelRef | undefined;
   readonly #requestedThinkingOptionId: HarnessThinkingOptionId | undefined;
-  readonly #requireExactConfiguration: boolean;
   readonly #toolOutputLimit: number;
   readonly #isFastSupported: (ref: HarnessModelRef, transport: PiTurnTransport) => Promise<boolean>;
   #acceptingTurn = false;
@@ -437,7 +436,6 @@ class PiHarnessSession implements HarnessSession {
       closeTimeoutMs: number;
       model?: HarnessModelRef;
       thinkingOptionId?: HarnessThinkingOptionId;
-      requireExactConfiguration?: boolean;
       toolOutputLimit: number;
       supportsThinkingSelection: boolean;
       isFastSupported: (ref: HarnessModelRef, transport: PiTurnTransport) => Promise<boolean>;
@@ -453,7 +451,6 @@ class PiHarnessSession implements HarnessSession {
     this.#closeTimeoutMs = options.closeTimeoutMs;
     this.#requestedModel = options.model;
     this.#requestedThinkingOptionId = options.thinkingOptionId;
-    this.#requireExactConfiguration = options.requireExactConfiguration === true;
     this.#toolOutputLimit = options.toolOutputLimit;
     this.#isFastSupported = options.isFastSupported;
     this.capabilities = {
@@ -1191,16 +1188,6 @@ class PiHarnessSession implements HarnessSession {
             });
           }
           state = await transport.selectThinkingOption(this.#requestedThinkingOptionId);
-          if (
-            this.#requireExactConfiguration &&
-            state.thinkingLevel !== this.#requestedThinkingOptionId
-          ) {
-            throw new PiAdapterFaultError({
-              code: "invalidRequest",
-              message: "Pi did not activate the requested Thinking level",
-              retryable: false,
-            });
-          }
           thinkingLevels = await transport.getAvailableThinkingLevels();
         }
         this.#transport = transport;
@@ -2396,7 +2383,6 @@ export class PiAdapter implements HarnessAdapter {
           ...(input.model ? { model: input.model } : {}),
           ...(thinkingOptionId?.success ? { thinkingOptionId: thinkingOptionId.data } : {}),
           supportsThinkingSelection: this.#thinkingSelectionSupported === true,
-          requireExactConfiguration: input.requireExactConfiguration === true,
         }),
       };
     }
@@ -2599,7 +2585,6 @@ export class PiAdapter implements HarnessAdapter {
       environment?: NodeJS.ProcessEnv;
       model?: HarnessModelRef;
       thinkingOptionId?: HarnessThinkingOptionId;
-      requireExactConfiguration?: boolean;
       supportsThinkingSelection: boolean;
       startedTransport?: PiTurnTransport;
       startedThinkingLevels?: HarnessThinkingOptionId[] | null;
@@ -2622,7 +2607,6 @@ export class PiAdapter implements HarnessAdapter {
         ...(options.model ? { model: options.model } : {}),
         ...(options.thinkingOptionId ? { thinkingOptionId: options.thinkingOptionId } : {}),
         toolOutputLimit: this.#toolOutputLimit,
-        requireExactConfiguration: options.requireExactConfiguration === true,
         supportsThinkingSelection: options.supportsThinkingSelection,
         isFastSupported: async (ref, transport) => {
           if (this.#inspectionCache.has(cwd)) return this.#isFastSupported(ref, cwd);

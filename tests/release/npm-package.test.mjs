@@ -43,8 +43,6 @@ import {
   createNpmMetaReadme,
   createNpmMetaPackageManifest,
   expectedNpmMetaPackagePaths,
-  runNpmMetaReleaseCli,
-  prepareNpmMetaPackage,
   validateNpmMetaPackage,
 } from "../../scripts/release/prepare-npm-meta.mjs";
 import { hostReleaseTargetId, releaseTarget } from "../../scripts/release/targets.mjs";
@@ -560,62 +558,6 @@ describe("npm package release", () => {
     expect(manifest.optionalDependencies).toEqual(
       Object.fromEntries(Object.values(NPM_PLATFORM_PACKAGE_NAMES).map((name) => [name, "0.1.0"])),
     );
-  });
-
-  it("limits explicit macOS meta dependencies and documentation to the built targets", () => {
-    const options = { version: "0.1.0", targets: ["macos-arm64", "macos-x64"] };
-    const manifest = createNpmMetaPackageManifest(options);
-    expect(manifest.os).toEqual(["darwin"]);
-    expect(manifest.cpu).toEqual(["arm64", "x64"]);
-    expect(manifest.optionalDependencies).toEqual({
-      "@codexhost/cli-darwin-arm64": "0.1.0",
-      "@codexhost/cli-darwin-x64": "0.1.0",
-    });
-    expect(createNpmMetaReadme(options)).toContain(
-      "This version includes platform packages for macos-arm64, macos-x64.",
-    );
-    for (const targets of [[], ["unknown"], ["macos-arm64", "macos-arm64"]]) {
-      expect(() => createNpmMetaPackageManifest({ version: "0.1.0", targets })).toThrow();
-    }
-  });
-
-  it("validates generated Mac-only meta platform constraints and dependencies", async () => {
-    const root = await temporaryDirectory();
-    const targets = ["macos-arm64", "macos-x64"];
-    try {
-      const { packageRoot } = await prepareNpmMetaPackage({ version: "0.1.0", root, targets });
-      expect(await validateNpmMetaPackage({ packageRoot, targets })).toEqual(
-        expectedNpmMetaPackagePaths(),
-      );
-      const manifestPath = path.join(packageRoot, "package.json");
-      const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
-      expect(manifest.os).toEqual(["darwin"]);
-      expect(manifest.cpu).toEqual(["arm64", "x64"]);
-      for (const field of ["os", "cpu", "optionalDependencies"]) {
-        const modified = { ...manifest };
-        delete modified[field];
-        await writeFile(manifestPath, JSON.stringify(modified));
-        await expect(validateNpmMetaPackage({ packageRoot, targets })).rejects.toThrow(
-          `${field} must match`,
-        );
-      }
-    } finally {
-      await rm(root, { recursive: true, force: true });
-    }
-  });
-
-  it("rejects invalid meta target flags before preparing files", async () => {
-    for (const args of [
-      ["--targets"],
-      ["--targets="],
-      ["--targets", "--pack"],
-      ["--targets", "unknown"],
-      ["--targets", "macos-arm64,macos-arm64"],
-      ["--targets=macos-arm64", "--targets", "macos-x64"],
-      ["--targets", "macos-arm64", "--targets=macos-x64"],
-    ]) {
-      await expect(runNpmMetaReleaseCli(args)).rejects.toThrow();
-    }
   });
 
   it("prints the star prompt before npm launch setup begins", () => {
