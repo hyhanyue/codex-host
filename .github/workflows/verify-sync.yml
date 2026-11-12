@@ -95,8 +95,4 @@ jobs:
         run: npm run test --workspace=@deepseek-ai/dsh-api-session-controller
 
       - name: Test upstream browser regressions
-        run: >
-          node --import tsx --test
-          packages/web-server/test/browser/ch-core-navigation.test.ts
-          packages/web-server/test/browser/ch-mobile-connection.test.ts
-          packages/web-server/test/browser/ch-progressive-loading.test.ts
+        run: npm run test:web:browser
