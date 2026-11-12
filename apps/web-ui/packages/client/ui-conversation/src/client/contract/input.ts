@@ -222,8 +222,19 @@ export interface SessionInput extends InputTarget {
   readonly state: SnapshotStore<InputState>;
 }
 
+/** One captured position in an existing draft; readiness follows its Composer and insertion is single-use. */
+export interface DraftReferenceInsertion {
+  /** Live availability, including the captured draft revision and Composer policy. */
+  getSnapshot(): boolean;
+  subscribe(listener: () => void): () => void;
+  /** Insert after the captured selection using the drop path's spacing and undo rules. */
+  insert(reference: ReferenceInsert): boolean;
+}
+
 /** Session-addressed access to the per-session input facade. */
 export interface SessionInputResolver {
+  /** Capture an existing input without creating one or moving focus; observe readiness through getSnapshot. */
+  captureReferenceInsertion(binding: SessionBinding): DraftReferenceInsertion | undefined;
   /** Resolve the facade for one session-scope ctx. */
   for(actx: Context): SessionInput;
   /**

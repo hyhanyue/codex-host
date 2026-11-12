@@ -11,12 +11,18 @@ import type { SettingsKey } from "./locales.ts";
 import css from "./GeneralSection.module.css";
 
 const GROUPS: readonly { title: SettingsKey; items: readonly string[] }[] = [
-  { title: "general.display", items: ["language", "appearance", "font-size"] },
+  {
+    title: "general.appAndNotifications",
+    items: ["codexhost.notifications", "codexhost.pwa-install"],
+  },
+  {
+    title: "general.display",
+    items: ["language", "appearance", "font-size", "workspace.recent-navigation"],
+  },
   {
     title: "general.interaction",
     items: ["transcript-view", "developer-tools", "shortcuts", "link-opening", "composer-enter"],
   },
-  { title: "general.notifications", items: ["codexhost.notifications"] },
 ];
 const GROUPED_ITEMS = new Set(GROUPS.flatMap((group) => group.items));
 

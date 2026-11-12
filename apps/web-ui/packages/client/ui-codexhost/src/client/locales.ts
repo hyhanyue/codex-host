@@ -2,6 +2,7 @@
 export const en = {
   "discovery.agents": "Delegation Agents",
   "discovery.sessions": "Sessions",
+  "reference.addedToDraft": "Added to the current draft",
   "discovery.commands": "Native commands",
   "discovery.skills": "Skills",
   "discovery.offline": "Host disconnected",
@@ -30,6 +31,8 @@ export const en = {
   "connection.offline": "Network appears offline. Showing previously synced content.",
   "connection.host": "Host unavailable; reconnecting…",
   "connection.error": "Could not sync messages. Retry the connection.",
+  "opening.loading": "Opening conversation…",
+  "opening.error": "Could not open conversation",
   "connection.checking": "Checking the connection…",
   "connection.computer": "Cannot reach your computer. Check that it is on and Web is running.",
   "connection.lastSynced": "Last synced at {time}",
@@ -181,6 +184,9 @@ export const en = {
   "connectDevices.relay.hint":
     "Connect across networks without an extra phone app. An access token is required.",
   "connectDevices.relay.off": "The official codexhost relay. It only forwards encrypted traffic.",
+  "connectDevices.relay.beta":
+    "Currently in private beta. For early access, follow the README to join the group chat and contact me.",
+  "connectDevices.relay.betaLink": "README community instructions",
   "connectDevices.relay.name": "Address name (optional)",
   "connectDevices.relay.nameHint":
     "4–20 lowercase letters or digits. Leave blank to let the relay assign a name.",
@@ -269,6 +275,12 @@ export const en = {
   "extensions.loading": "Loading extensions…",
   "extensions.loadFailed": "Could not load extensions: {message}",
   "extensions.actionFailed": "That did not work: {message}",
+  "extensions.unsupported":
+    "This Web cannot install this extension. It only supports themes, sidebar panels, and display components.",
+  "extensions.versionMismatch":
+    "This extension does not match this Web version, so it cannot be installed.",
+  "extensions.hostVersionSnapshotMissing":
+    "This Web cannot confirm whether the extension is compatible, so it cannot be installed.",
   "extensions.add": "Add extension",
   "extensions.installed": "Installed",
   "extensions.info": "About interface extensions",
@@ -443,6 +455,7 @@ export type ImportLocaleKey = keyof typeof en;
 export const zh: Record<ImportLocaleKey, string> = {
   "discovery.agents": "委派 Agent",
   "discovery.sessions": "会话",
+  "reference.addedToDraft": "已加入当前草稿",
   "discovery.commands": "原生命令",
   "discovery.skills": "Skills",
   "discovery.offline": "Host 已断线",
@@ -470,6 +483,8 @@ export const zh: Record<ImportLocaleKey, string> = {
   "connection.offline": "网络可能已断开，当前显示上次同步内容。",
   "connection.host": "Host 暂不可用，正在重连…",
   "connection.error": "消息同步失败，请重试连接。",
+  "opening.loading": "正在打开会话…",
+  "opening.error": "无法打开会话",
   "connection.checking": "正在检查连接…",
   "connection.computer": "无法连接到电脑，请确认电脑已开机且 Web 正在运行。",
   "connection.lastSynced": "上次同步于 {time}",
@@ -608,6 +623,9 @@ export const zh: Record<ImportLocaleKey, string> = {
   "connectDevices.relay.summary": "任何网络 · 手机无需安装应用",
   "connectDevices.relay.hint": "跨网络连接，手机无需额外安装应用，登录需要访问令牌。",
   "connectDevices.relay.off": "codexhost 官方中转，只转发加密内容。",
+  "connectDevices.relay.beta":
+    "目前正在内测中，想提前体验，欢迎按 README 中的说明加入交流群联系我～",
+  "connectDevices.relay.betaLink": "查看 README 加群说明",
   "connectDevices.relay.name": "地址名（可选）",
   "connectDevices.relay.nameHint": "4–20 位小写字母和数字，留空由中转分配。",
   "connectDevices.relay.inviteLabel": "邀请码",
@@ -686,6 +704,9 @@ export const zh: Record<ImportLocaleKey, string> = {
   "extensions.loading": "正在加载界面扩展…",
   "extensions.loadFailed": "无法加载界面扩展：{message}",
   "extensions.actionFailed": "操作失败：{message}",
+  "extensions.unsupported": "当前 Web 不支持这个扩展。这里只能安装主题、侧栏和展示组件。",
+  "extensions.versionMismatch": "这个扩展和当前 Web 版本不匹配，无法安装。",
+  "extensions.hostVersionSnapshotMissing": "当前 Web 无法确认这个扩展是否兼容，无法安装。",
   "extensions.add": "添加扩展",
   "extensions.installed": "已安装",
   "extensions.info": "界面扩展说明",

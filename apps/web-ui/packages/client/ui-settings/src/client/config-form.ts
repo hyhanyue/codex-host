@@ -35,6 +35,8 @@ import { BrowserPreferences, isBrowserPreference } from "./browser-preferences.t
 interface ConfigFormSpec<T> {
   /** Settings namespace registered by the owning Host plugin. */
   namespace: string;
+  /** Client-owned schema and defaults; never described or written through the Host. */
+  browserView?: SettingsNamespaceView;
   /**
    * Narrow one wire section; undefined keeps the last accepted value. The
    * default validates the section against the namespace's own serialized wire
@@ -89,15 +91,18 @@ export class ConfigFormController<T> implements ConfigForm<T> {
       mode: persistence,
     });
     if (persistence !== "memory") {
-      const unsubscribe = mirror.subscribe(() => {
-        this.derive();
-      });
+      const unsubscribe =
+        spec.browserView === undefined
+          ? mirror.subscribe(() => {
+              this.derive();
+            })
+          : undefined;
       const onStorage = (event: StorageEvent): void => {
         if (event.key === null || event.key === this.browser?.key) this.derive();
       };
       if (this.browser !== undefined) window.addEventListener("storage", onStorage);
       this.unsubscribe = () => {
-        unsubscribe();
+        unsubscribe?.();
         if (this.browser !== undefined) window.removeEventListener("storage", onStorage);
       };
       this.derive();
@@ -116,6 +121,14 @@ export class ConfigFormController<T> implements ConfigForm<T> {
    */
   subscribe(listener: () => void): () => void {
     return this.store.subscribe(listener);
+  }
+
+  /** Refresh feature-owned browser defaults/schema while retaining the existing form and saved values. */
+  updateBrowserView(view: SettingsNamespaceView): void {
+    if (this.browser === undefined || view.ns !== this.spec.namespace)
+      throw new Error("ui-settings: browser view does not belong to this form");
+    this.spec.browserView = view;
+    this.derive();
   }
 
   /**
@@ -150,7 +163,7 @@ export class ConfigFormController<T> implements ConfigForm<T> {
     const browser = this.browser;
     if (browser !== undefined) {
       return this.enqueue(() => {
-        const view = this.mirror.namespace(this.spec.namespace);
+        const view = this.spec.browserView ?? this.mirror.namespace(this.spec.namespace);
         const saved = view !== undefined && browser.write(view, ownedOps, expectedRevision);
         this.derive();
         return Promise.resolve(saved);
@@ -216,11 +229,9 @@ export class ConfigFormController<T> implements ConfigForm<T> {
   private derive(): void {
     if (this.disposed) return;
     const mirrored = this.mirror.getSnapshot();
-    if (mirrored.view === undefined) return;
-    const { writable } = mirrored.view;
-    const hostView = mirrored.view.namespaces.find(
-      (candidate) => candidate.ns === this.spec.namespace,
-    );
+    if (this.spec.browserView === undefined && mirrored.view === undefined) return;
+    const writable = mirrored.view?.writable ?? false;
+    const hostView = this.spec.browserView ?? this.mirror.namespace(this.spec.namespace);
     if (hostView === undefined) {
       this.store.update((draft) => {
         draft.status = "unavailable";
@@ -341,6 +352,41 @@ export class ConfigForms extends Service {
     );
     this.forms.set(entryId, form);
     void this.mirror.ensure();
+    return form;
+  }
+
+  /** Register or refresh a feature-owned, allowlisted browser form without a Host namespace or RPC. */
+  registerBrowser<T>(
+    namespace: string,
+    schema: unknown,
+    defaults: Record<string, JsonValue>,
+  ): ConfigForm<T> {
+    if (!isBrowserPreference(namespace))
+      throw new Error(`ui-settings: ${namespace} is not a browser preference namespace`);
+    const browserView: SettingsNamespaceView = {
+      ns: namespace,
+      autoGenerate: false,
+      applies: "live",
+      secrets: [],
+      schema: schema as JsonValue,
+      base: defaults,
+      user: {},
+      value: defaults,
+      revision: 0,
+    };
+    const existing = this.forms.get(namespace);
+    if (existing !== undefined) {
+      existing.updateBrowserView(browserView);
+      return existing as ConfigFormController<T>;
+    }
+    const form = new ConfigFormController<T>(
+      this.owner,
+      { namespace, browserView },
+      this.mirror,
+      "browser",
+      this.schema,
+    );
+    this.forms.set(namespace, form);
     return form;
   }
 

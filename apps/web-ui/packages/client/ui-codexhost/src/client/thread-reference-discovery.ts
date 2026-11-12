@@ -1,4 +1,4 @@
-/** Search the shared local Thread catalog and insert the same reference as sidebar drag. */
+/** Search the shared Thread catalog and insert the same reference as sidebar drag. */
 import type { Context } from "@deepseek-ai/cordis";
 import type {} from "@deepseek-ai/dsh-api-session-controller/client";
 import type {} from "@deepseek-ai/dsh-api-workspace-controller/client";
@@ -11,18 +11,20 @@ import {
 } from "@deepseek-ai/dsh-client-ui-conversation/thread-reference";
 import type {} from "@deepseek-ai/dsh-client-ui-input-trigger/client";
 
+export function supportsThreadReferences(ctx: Context, id: SessionId): boolean {
+  const row = ctx.sessions.list.getSnapshot().byId[id];
+  return (
+    row !== undefined &&
+    ctx.sessions.subagentAddress(id) === undefined &&
+    (threadReferenceOf(row) !== undefined ||
+      (row.blank && row.projectionValues?.harnessIdentity != null))
+  );
+}
+
 export function registerThreadReferenceDiscovery(ctx: Context): void {
   const t = ctx.locale.bind("codexhostImport");
   const openings = new WeakMap<object, Promise<void>>();
-  const supported = (id: SessionId) => {
-    const row = ctx.sessions.list.getSnapshot().byId[id];
-    return (
-      row !== undefined &&
-      ctx.sessions.subagentAddress(id) === undefined &&
-      (threadReferenceOf(row) !== undefined ||
-        (row.blank && row.projectionValues?.harnessIdentity != null))
-    );
-  };
+  const supported = (id: SessionId) => supportsThreadReferences(ctx, id);
   ctx.effect(
     () =>
       ctx.inputTriggers.registerSource({
@@ -73,7 +75,7 @@ export function registerThreadReferenceDiscovery(ctx: Context): void {
                 !workspace.toLowerCase().includes(query)
               )
                 return [];
-              return [{ reference, workspace, updatedAt: row.updatedAt }];
+              return [{ id, reference, workspace, updatedAt: row.updatedAt }];
             })
             .sort(
               (a, b) =>
@@ -81,10 +83,10 @@ export function registerThreadReferenceDiscovery(ctx: Context): void {
                 a.reference.threadId.localeCompare(b.reference.threadId),
             )
             .slice(0, query === "" ? 5 : undefined)
-            .map(({ reference, workspace }) => ({
-              name: reference.threadId,
+            .map(({ id, reference, workspace }) => ({
+              name: id,
               label: reference.title,
-              value: reference.threadId,
+              value: id,
               showAlias: false,
               section: t("discovery.sessions"),
               description: [workspace, reference.threadId].filter(Boolean).join(" · "),
