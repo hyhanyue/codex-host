@@ -123,7 +123,7 @@ it(
         "--ch-cdp",
         debug.endpoint,
         "--dev-web-ui",
-        resolve("apps/web-ui"),
+        resolve(import.meta.dirname, "../../../../apps/web-ui"),
       ],
       { authenticated: true },
     );
@@ -214,7 +214,7 @@ it(
         "--ch-cdp",
         debug.endpoint,
         "--dev-web-ui",
-        resolve("apps/web-ui"),
+        resolve(import.meta.dirname, "../../../../apps/web-ui"),
       ],
       { authenticated: true },
     );
@@ -559,7 +559,7 @@ it(
         "--ch-cdp",
         debug.endpoint,
         "--dev-web-ui",
-        resolve("apps/web-ui"),
+        resolve(import.meta.dirname, "../../../../apps/web-ui"),
       ],
       { authenticated: true },
     );

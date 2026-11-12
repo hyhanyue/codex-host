@@ -120,12 +120,47 @@ it(
     await composer.press("ControlOrMeta+C");
     assert.equal(await page.evaluate(() => navigator.clipboard.readText()), `@${text}`);
     await composer.press("ArrowLeft");
+    // Wait for the editor to commit the collapsed caret before deleting the temporary @.
+    await page.waitForFunction(() => {
+      const editor = Array.from(
+        document.querySelectorAll<HTMLElement>("[data-composer-input]"),
+      ).find((element) => element.getClientRects().length > 0);
+      const selection = window.getSelection();
+      if (
+        !editor ||
+        !selection?.isCollapsed ||
+        !selection.anchorNode ||
+        !editor.contains(selection.anchorNode)
+      )
+        return false;
+      const prefix = document.createRange();
+      prefix.selectNodeContents(editor);
+      prefix.setEnd(selection.anchorNode, selection.anchorOffset);
+      return prefix.toString() === "";
+    });
     await composer.press("Delete");
     await page.getByText("kept.txt", { exact: true }).waitFor();
-    await page.waitForFunction((expected) => {
-      const stored = JSON.parse(localStorage.getItem("dsh.conversation.existing") ?? "null");
-      return stored?.draft?.text === expected && stored.draft.references.length === 2;
-    }, text);
+    try {
+      await page.waitForFunction((expected) => {
+        const stored = JSON.parse(localStorage.getItem("dsh.conversation.existing") ?? "null");
+        return stored?.draft?.text === expected && stored.draft.references.length === 2;
+      }, text);
+    } catch (error) {
+      const actual = await page.evaluate(() => ({
+        stored: localStorage.getItem("dsh.conversation.existing"),
+        editors: Array.from(document.querySelectorAll("[data-composer-input]"), (editor) => ({
+          text: editor.textContent,
+          html: editor.innerHTML,
+        })),
+        selection: window.getSelection()?.toString(),
+      }));
+      throw new Error(
+        `Delegation draft did not persist: ${JSON.stringify({ expected: text, actual })}`,
+        {
+          cause: error,
+        },
+      );
+    }
     await page.reload();
     await composer.waitFor();
     await chips.first().waitFor();

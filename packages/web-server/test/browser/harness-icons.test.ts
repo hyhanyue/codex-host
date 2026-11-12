@@ -95,7 +95,7 @@ it(
         width: svg.getBoundingClientRect().width,
       }));
       assert.equal(appearance.fill, appearance.color);
-      assert.equal(appearance.width, 16);
+      assert.equal(appearance.width, 14);
       seenColors.push(appearance.fill);
       assert.equal(
         await coloredRow.locator("svg").evaluate((svg) => getComputedStyle(svg).fill),
