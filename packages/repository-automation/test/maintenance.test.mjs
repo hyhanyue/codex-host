@@ -84,10 +84,10 @@ describe("PR labels and a single terminal CI result only", () => {
     const f = fixture();
     await f.run();
     const failure = ci({ conclusion: "failure", run_attempt: 2 });
-    failure.jobs[2] = { ...failure.jobs[2], id: 3, conclusion: "failure" };
+    failure.jobs[0] = { ...failure.jobs[0], id: 3, conclusion: "failure" };
     f.setCi(failure);
     await f.run();
-    expect(f.getComments()[0].body).toContain("❌ Windows CI 失败");
+    expect(f.getComments()[0].body).toContain("❌ macOS CI 失败");
     expect(f.getComments()[0].body).toContain("src/foo.ts(42,5): error TS2322");
     f.setCi(ci({ run_attempt: 3 }));
     await f.run();

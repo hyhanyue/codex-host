@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -18,11 +19,22 @@ afterEach(async () => {
   await rm(root, { recursive: true, force: true });
 });
 
+const npmBytes = Buffer.from("Fork npm package");
+async function downloadNpm(source: { url: string }, destination: string) {
+  await writeFile(destination, npmBytes);
+  return { bytes: npmBytes.length, finalUrl: source.url };
+}
+
 const release = {
   version: "1.1.0",
   releaseNotes: "Fixes",
-  releaseNotesUrl: "https://github.com/BytePioneer-AI/codex-host/releases/tag/v1.1.0",
-  assets: [],
+  releaseNotesUrl: "https://github.com/hyhanyue/codex-host/releases/tag/v1.1.0",
+  assets: ["codexhost-cli-1.1.0.tgz", "codexhost-cli-1.1.0-linux-x64.tgz"].map((name) => ({
+    name,
+    size: npmBytes.length,
+    digest: `sha256:${createHash("sha256").update(npmBytes).digest("hex")}`,
+    downloadUrl: `https://github.com/hyhanyue/codex-host/releases/download/v1.1.0/${name}`,
+  })),
 };
 
 async function npmLayout(platform: NodeJS.Platform = process.platform) {
@@ -115,6 +127,39 @@ describe("console updates", () => {
     },
   );
 
+  it("reports no update when the Fork has no eligible Release", async () => {
+    const { target, environment } = await npmLayout();
+    const updates = createConsoleUpdates({
+      onHandedOff: vi.fn(),
+      environment,
+      stateDirectory: path.join(root, "state"),
+      fetchLatest: async () => null,
+    });
+    await expect(updates.check(target)).resolves.toMatchObject({
+      latestVersion: null,
+      updateAvailable: false,
+      installationAvailable: false,
+      error: null,
+    });
+    await expect(updates.start(target)).rejects.toThrow("no longer the current");
+  });
+
+  it("shows a verified Release but refuses installation if an npm tarball is missing", async () => {
+    const { target, environment } = await npmLayout();
+    const updates = createConsoleUpdates({
+      onHandedOff: vi.fn(),
+      environment,
+      stateDirectory: path.join(root, "state"),
+      fetchLatest: async () => ({ ...release, assets: release.assets.slice(0, 1) }),
+    });
+    await expect(updates.check(target)).resolves.toMatchObject({
+      latestVersion: "1.1.0",
+      updateAvailable: true,
+      installationAvailable: false,
+    });
+    await expect(updates.start(target)).rejects.toThrow("exactly one");
+  });
+
   it.each(["failed", "succeeded", "prepared"])(
     "does not display historical %s state",
     async (phase) => {
@@ -185,6 +230,61 @@ describe("console updates", () => {
     });
   });
 
+  it("hands off to the Updater before returning", async () => {
+    const { target, environment } = await npmLayout("linux");
+    target.dataDirectory = path.join(root, "custom-data");
+    target.restartTarget = "web";
+    const spawnUpdater = vi.fn<(executable: string, requestPath: string) => never>(
+      () => Object.assign(new EventEmitter(), { pid: 4321, kill: vi.fn() }) as never,
+    );
+    const onHandedOff = vi.fn();
+    const updates = createConsoleUpdates({
+      onHandedOff,
+      waitForHandoff: true,
+      environment,
+      platform: "linux",
+      processId: 777,
+      processExecutable: process.execPath,
+      stateDirectory: path.join(root, "state"),
+      fetchLatest: async () => release,
+      manager: createBackgroundUpdateManager({
+        platform: "linux",
+        download: downloadNpm,
+        spawnUpdater,
+      }),
+    });
+
+    await updates.check(target);
+    const starting = updates.start(target);
+    await vi.waitFor(() => expect(spawnUpdater).toHaveBeenCalledOnce());
+    expect(onHandedOff).not.toHaveBeenCalled();
+    const call = spawnUpdater.mock.calls[0];
+    if (!call) throw new Error("Updater was not spawned");
+    const spawnedRequest = JSON.parse(await readFile(call[1], "utf8"));
+    const status = JSON.parse(await readFile(spawnedRequest.status_path, "utf8"));
+    await writeFile(
+      spawnedRequest.status_path,
+      JSON.stringify({ ...status, phase: "waiting-for-exit" }),
+    );
+    const result = await starting;
+
+    expect(result.status.phase).toBe("waiting-for-exit");
+    expect(result.status).toMatchObject({ version: "1.1.0", installation: "npm" });
+    expect(onHandedOff).toHaveBeenCalledOnce();
+    const requestPath = (spawnUpdater.mock.calls[0] as unknown as [string, string])[1];
+    const request = JSON.parse(await readFile(requestPath, "utf8")) as Record<string, unknown>;
+    expect(request).toMatchObject({
+      wait_pid: 777,
+      wait_executable: process.execPath,
+      runtime_descriptor_path: target.runtimeDescriptorPath,
+      data_directory: target.dataDirectory,
+      restart_target: "web",
+    });
+    expect(
+      JSON.parse(await readFile(path.join(root, "state", "active-update-v1.lock"), "utf8")),
+    ).toMatchObject({ ownerPid: 4321 });
+  });
+
   it("shows the current preparation failure and replaces it when retrying", async () => {
     const { target, environment } = await npmLayout("linux");
     await rm(environment.CODEXHOST_NPM_CLI_PATH);
@@ -201,6 +301,7 @@ describe("console updates", () => {
       fetchLatest: async () => release,
       manager: createBackgroundUpdateManager({
         platform: "linux",
+        download: downloadNpm,
         spawnUpdater,
       }),
     });
@@ -237,6 +338,7 @@ describe("console updates", () => {
       fetchLatest: async () => release,
       manager: createBackgroundUpdateManager({
         platform: "linux",
+        download: downloadNpm,
         spawnUpdater: () => {
           queueMicrotask(() => child.emit(event, new Error("spawn failed")));
           return child as never;

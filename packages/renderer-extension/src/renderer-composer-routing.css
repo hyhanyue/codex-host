@@ -1,0 +1,25 @@
+[data-codexhost-routing-panel] {
+  gap: 10px;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+[data-codexhost-routing-panel] .text-base {
+  font-size: 15px;
+  font-weight: 650;
+}
+
+[data-codexhost-routing-panel] .text-codex-description {
+  font-size: 12px;
+}
+
+[data-codexhost-routing-panel] .text-xs {
+  font-size: 11px;
+}
+
+[data-codexhost-routing-panel] select {
+  appearance: auto;
+  min-height: 32px;
+  padding-block: 4px;
+  font-size: 13px;
+}

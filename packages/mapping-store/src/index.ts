@@ -12,6 +12,7 @@ export {
 } from "./records.js";
 export type {
   CommitReadyThreadInput,
+  CommitThreadHandoffInput,
   CreateDelegationInput,
   CreateProvisionalThreadInput,
   DelegationStatus,

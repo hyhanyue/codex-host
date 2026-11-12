@@ -15,10 +15,10 @@ describe("remote failure messages", () => {
   it("recognises a failure followed by a detail or recorded with its error class", () => {
     expect(
       localizeRemoteFailure(
-        "The requested release is unavailable or npm cannot reach the registry: remote update command failed (exit status: 1)",
+        "Install the verified Fork Release on the remote computer before restarting: remote update command failed (exit status: 1)",
         zh,
       ),
-    ).toBe("目标版本不存在，或远程电脑无法访问 npm 仓库");
+    ).toBe("请先在远程电脑上安装已验证的 Fork Release，再重新启动服务");
     expect(localizeRemoteFailure("Error: Remote updater is unavailable", zh)).toBe(
       "远程更新程序不可用",
     );

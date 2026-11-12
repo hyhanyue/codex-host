@@ -151,6 +151,7 @@ export async function runSharedHostService(
           desktopOutput: owner.output,
           diagnosticOutput: process.stderr,
           externalOnly: true,
+          localNativeHandoff: remote === null,
           desktopConnected: () => desktops.size > 0,
           mappingStore: store,
           closeMappingStoreOnExit: false,

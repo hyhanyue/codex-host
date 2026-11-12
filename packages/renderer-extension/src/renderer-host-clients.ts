@@ -8,6 +8,7 @@ import {
 } from "@codexhost/shared-contracts";
 import {
   createRendererModelClient,
+  CODEX_ACCOUNT_CHANGED_METHOD,
   THREAD_USAGE_UPDATED_METHOD,
   type RendererModelClient,
 } from "./renderer-model-client.js";
@@ -72,17 +73,14 @@ export function createRendererHostClients(
                 listener: (notification: unknown) => void,
               ) {
                 const unsubscribe = target.addNotificationCallback?.(methods, listener);
-                if (
-                  !messages ||
-                  !(typeof methods === "string" ? [methods] : methods).some((method) =>
-                    [
-                      THREAD_USAGE_UPDATED_METHOD,
-                      HARNESS_PREFERENCES_CHANGED_METHOD,
-                      HARNESS_DISPLAY_CHANGED_METHOD,
-                    ].includes(method),
-                  )
-                )
-                  return () => unsubscribe?.();
+                const requested = typeof methods === "string" ? [methods] : methods;
+                const relayed = [
+                  THREAD_USAGE_UPDATED_METHOD,
+                  CODEX_ACCOUNT_CHANGED_METHOD,
+                  HARNESS_PREFERENCES_CHANGED_METHOD,
+                  HARNESS_DISPLAY_CHANGED_METHOD,
+                ].filter((method) => requested.includes(method));
+                if (!messages || relayed.length === 0) return () => unsubscribe?.();
                 // Like manual compaction, observe the real Host frame before Desktop's
                 // app-server method table drops custom notifications. No synthetic Tokens.
                 const onMessage: Parameters<RendererMessageTarget["addEventListener"]>[1] = (
@@ -99,14 +97,8 @@ export function createRendererHostClients(
                     !("hostId" in message) ||
                     message.hostId !== route.hostId ||
                     !("method" in message) ||
-                    ![
-                      THREAD_USAGE_UPDATED_METHOD,
-                      HARNESS_PREFERENCES_CHANGED_METHOD,
-                      HARNESS_DISPLAY_CHANGED_METHOD,
-                    ].includes(String(message.method)) ||
-                    !(typeof methods === "string" ? [methods] : methods).includes(
-                      String(message.method),
-                    ) ||
+                    typeof message.method !== "string" ||
+                    !relayed.includes(message.method) ||
                     readRouting()?.forHost(route.hostId) !== route
                   )
                     return;

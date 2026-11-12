@@ -23,6 +23,6 @@ jobs:
       - run: npm run build:typescript
       - run: npx playwright install chromium
       - run: npm run build:web:ui
-      - name: Pure upstream browser failure baseline
+      - name: Candidate browser targeted diagnosis
         working-directory: packages/web-server
         run: node --import tsx --test test/browser/access-tokens.test.ts test/browser/ch-cache-navigation.test.ts test/browser/ch-compaction.test.ts test/browser/ch-resume-stream.test.ts test/browser/ch-scoped-projections.test.ts test/browser/ch-session-cache.test.ts test/browser/ch-session-import.test.ts test/browser/composer-commands.test.ts test/browser/connect-controls.test.ts test/browser/delegation-agent-menu.test.ts test/browser/desktop-screenshot.test.ts test/browser/file-mentions.test.ts test/browser/harness-icons.test.ts test/browser/harness-order.test.ts test/browser/markdown-compatibility.test.ts test/browser/model-selection.test.ts test/browser/phone-sidebar-layering.test.ts test/browser/phone-sidebar.test.ts test/browser/preferences.test.ts test/browser/relay-tool-output.test.ts test/browser/right-sidebar-touch.test.ts test/browser/voice-recorder-layout.test.ts

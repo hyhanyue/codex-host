@@ -32,7 +32,7 @@ There is also a **Web app**: the same Codex interface with lower memory use, so 
   <a href="docs/harnesses/copilot/copilot-harness-integration.md"><img alt="GitHub Copilot" src="https://img.shields.io/badge/Copilot-181717?logo=githubcopilot&logoColor=white" /></a>
 </p>
 
-<p align="center"><a href="https://github.com/BytePioneer-AI/codex-host/releases"><strong>Download</strong></a> · <a href="#quick-start">Quick Start</a> · <a href="#desktop">Desktop</a> · <a href="#collaboration">Cross-Agent Collaboration</a> · <a href="#join-the-community">微信交流群</a> · <a href="docs/project/README.zh-CN.md">简体中文</a> · <a href="docs/project/README.ko.md">한국어</a></p>
+<p align="center"><a href="https://github.com/hyhanyue/codex-host/releases"><strong>Download</strong></a> · <a href="#quick-start">Quick Start</a> · <a href="#desktop">Desktop</a> · <a href="#collaboration">Cross-Agent Collaboration</a> · <a href="#join-the-community">微信交流群</a> · <a href="docs/project/README.zh-CN.md">简体中文</a> · <a href="docs/project/README.ko.md">한국어</a></p>
 
 <img width="90%" src="docs/imgs/hero-desktop-phone.png" alt="Several Agent sessions and the Diff review panel in Codex Desktop, with the same session open on a phone at the bottom right">
 
@@ -57,16 +57,20 @@ There is also a **Web app**: the same Codex interface with lower memory use, so 
 
 **Option 1: npm** (macOS / Windows / Linux)
 
+Download both the platform and meta tarballs for the same version from [this fork’s Releases](https://github.com/hyhanyue/codex-host/releases), then substitute their actual filenames below. Installing `@codexhost/cli` from the public npm registry installs the upstream distribution.
+
 ```bash
-npm install -g @codexhost/cli
+npm install -g --offline --omit=optional --ignore-scripts ./codexhost-cli-<version>-<platform>.tgz ./codexhost-cli-<version>.tgz
 codexhost          # start Codex Desktop
 codexhost web      # start Web and open it in your browser
 codexhost stop     # stop all CodexHost background services
 ```
 
+This fork maintains its custom Agent handoff, configured Composer delegation, and account quota controls on `main`. Built-in updates accept only published stable Releases from `hyhanyue/codex-host` whose actual tag commit belongs to `main` history. An empty Release list means no update. The Release must include both npm tarballs for npm installations.
+
 **Option 2: Installer** (macOS / Windows)
 
-Grab the installer for your platform from [Releases](https://github.com/BytePioneer-AI/codex-host/releases). For Web: open codexhost after installing, then visit http://127.0.0.1:4400 locally.
+Grab the installer for your platform from [Releases](https://github.com/hyhanyue/codex-host/releases). For Web: open codexhost after installing, then visit http://127.0.0.1:4400 locally.
 
 > Linux is supported on x64 and ARM64. See the [Linux guide](docs/platforms/linux/linux.md).
 
@@ -221,7 +225,7 @@ Before you start, add the remote machine in Codex Desktop under **Settings → C
 1. Install and start codexhost on the remote machine:
 
    ```bash
-   npm install -g @codexhost/cli
+   npm install -g --offline --omit=optional --ignore-scripts ./codexhost-cli-<version>-<platform>.tgz ./codexhost-cli-<version>.tgz
    codexhost remote install
    codexhost remote start
    codexhost remote status
@@ -285,7 +289,7 @@ Please read the [contributing guide](CONTRIBUTING.md) before opening an issue or
 Requirements: the official Codex Desktop, Node.js 22.19+ or 24, and Rust.
 
 ```bash
-git clone https://github.com/BytePioneer-AI/codex-host
+git clone https://github.com/hyhanyue/codex-host
 cd codex-host
 npm ci
 npm start

@@ -59,33 +59,7 @@ import { createRendererUpdateStatusPoll } from "./update-status-poll.js";
 import { RendererRequestTransportError } from "../renderer-request-sender.js";
 
 export const CODEXHOST_GITHUB_REPOSITORY_URL = "https://github.com/BytePioneer-AI/codex-host";
-export const CODEXHOST_RELEASES_LATEST_URL = `${CODEXHOST_GITHUB_REPOSITORY_URL}/releases/latest`;
-export const CODEXHOST_NPM_MANUAL_UPDATE_COMMAND = "npm install -g @codexhost/cli@latest";
-
-interface RendererUserAgentData {
-  readonly platform?: string;
-  readonly architecture?: string;
-  readonly bitness?: string;
-}
-
-function rendererUserAgentData(navigator: Navigator): RendererUserAgentData | undefined {
-  return (navigator as Navigator & { userAgentData?: RendererUserAgentData }).userAgentData;
-}
-
-function isWindowsRenderer(window: Window | null | undefined): boolean {
-  const navigator = window?.navigator;
-  if (!navigator) return false;
-  const identity = `${rendererUserAgentData(navigator)?.platform ?? ""} ${navigator.platform ?? ""} ${navigator.userAgent}`;
-  return /windows|win32|win64/iu.test(identity);
-}
-
-function windowsInstallerDownloadUrl(window: Window | null | undefined, version: string): string {
-  const navigator = window?.navigator;
-  const hints = navigator ? rendererUserAgentData(navigator) : undefined;
-  const identity = `${hints?.architecture ?? ""} ${hints?.platform ?? ""} ${navigator?.platform ?? ""} ${navigator?.userAgent ?? ""}`;
-  const architecture = /arm64|aarch64|\barm\b/iu.test(identity) ? "arm64" : "x64";
-  return `https://github.com/BytePioneer-AI/codex-host/releases/download/v${version}/codexhost-${version}-windows-${architecture}.exe`;
-}
+export const CODEXHOST_RELEASES_URL = "https://github.com/hyhanyue/codex-host/releases";
 
 export const DEFAULT_RENDERER_SETTINGS_PAGE_IDS = [
   "connections",
@@ -301,7 +275,6 @@ function updatesPage(
     icon: "updates",
     mount(context: RendererSettingsPageMountContext) {
       const document = context.content.ownerDocument;
-      const windows = isWindowsRenderer(document.defaultView);
       const heading = document.createElement("div");
       heading.className = "settings-section-label";
       heading.textContent = messages.pageLabels.updates;
@@ -337,67 +310,11 @@ function updatesPage(
       const manualTitle = document.createElement("div");
       manualTitle.className = "settings-update-manual-title";
       manualTitle.textContent = messages.updateManualTitle;
-      const manualNpm = document.createElement("div");
-      manualNpm.className = "settings-update-manual";
-      manualNpm.hidden = true;
-      const manualNpmDescription = document.createElement("p");
-      manualNpmDescription.className = "settings-update-manual-description";
-      manualNpmDescription.textContent = messages.updateManualNpmDescription;
-      const manualNpmCommandRow = document.createElement("div");
-      manualNpmCommandRow.className = "settings-update-command";
-      const manualNpmCommand = document.createElement("code");
-      manualNpmCommand.textContent = CODEXHOST_NPM_MANUAL_UPDATE_COMMAND;
-      const copyCommand = document.createElement("button");
-      copyCommand.type = "button";
-      copyCommand.className = "settings-update-command__copy";
-      const setCopyLabel = (label: string): void => {
-        copyCommand.replaceChildren(createRendererSettingsIcon("copy", 14), label);
-      };
-      setCopyLabel(messages.updateCopyCommand);
-      copyCommand.addEventListener("click", () => {
-        const clipboard = document.defaultView?.navigator.clipboard;
-        const restore = (label: string): void => {
-          setCopyLabel(label);
-          document.defaultView?.setTimeout(() => setCopyLabel(messages.updateCopyCommand), 2_000);
-        };
-        if (!clipboard) {
-          restore(messages.updateCopyFailed);
-          return;
-        }
-        void clipboard.writeText(CODEXHOST_NPM_MANUAL_UPDATE_COMMAND).then(
-          () => restore(messages.updateCommandCopied),
-          () => restore(messages.updateCopyFailed),
-        );
-      });
-      manualNpmCommandRow.append(manualNpmCommand, copyCommand);
-      manualNpm.append(manualNpmDescription, manualNpmCommandRow);
-      const manualWindowsInstaller = document.createElement("div");
-      manualWindowsInstaller.className = "settings-update-manual";
-      manualWindowsInstaller.hidden = true;
-      const manualWindowsInstallerDescription = document.createElement("p");
-      manualWindowsInstallerDescription.className = "settings-update-manual-description";
-      manualWindowsInstallerDescription.textContent = messages.updateWindowsInstallerDescription;
-      const manualWindowsInstallerActions = document.createElement("div");
-      manualWindowsInstallerActions.className = "settings-update-actions";
-      const manualWindowsInstallerLink = document.createElement("a");
-      manualWindowsInstallerLink.className = "settings-update-link";
-      manualWindowsInstallerLink.href = CODEXHOST_RELEASES_LATEST_URL;
-      manualWindowsInstallerLink.target = "_blank";
-      manualWindowsInstallerLink.rel = "noopener noreferrer";
-      manualWindowsInstallerLink.append(
-        messages.updateDownloadWindowsInstaller,
-        createRendererSettingsIcon("external-link", 14),
-      );
-      manualWindowsInstallerActions.append(manualWindowsInstallerLink);
-      manualWindowsInstaller.append(
-        manualWindowsInstallerDescription,
-        manualWindowsInstallerActions,
-      );
       const actions = document.createElement("div");
       actions.className = "settings-update-actions";
       const releaseLink = document.createElement("a");
       releaseLink.className = "settings-update-link";
-      releaseLink.href = CODEXHOST_RELEASES_LATEST_URL;
+      releaseLink.href = CODEXHOST_RELEASES_URL;
       releaseLink.target = "_blank";
       releaseLink.rel = "noopener noreferrer";
       releaseLink.append(
@@ -405,7 +322,7 @@ function updatesPage(
         createRendererSettingsIcon("external-link", 14),
       );
       actions.append(releaseLink);
-      controls.append(manualTitle, manualNpm, manualWindowsInstaller, actions);
+      controls.append(manualTitle, actions);
 
       // Release notes render below the fold, in the page scroller rather than a
       // nested one. The Star banner stays above them so it remains visible
@@ -424,12 +341,6 @@ function updatesPage(
         controls.className = fallback
           ? "settings-update-controls"
           : "settings-update-controls is-quiet";
-        manualNpmDescription.textContent = fallback
-          ? messages.updateManualFallbackDescription
-          : messages.updateManualNpmDescription;
-        manualNpmDescription.className = fallback
-          ? "settings-update-manual-description is-fallback"
-          : "settings-update-manual-description";
       };
       let pending = false;
       let checkedStatus: UpdateStatus | null = null;
@@ -457,12 +368,7 @@ function updatesPage(
         latestVersionValue.textContent = "-";
         latestVersionValue.className = "";
         installationValue.textContent = "-";
-        manualTitle.hidden = false;
-        manualNpm.hidden = true;
-        manualWindowsInstaller.hidden = true;
-        manualWindowsInstallerLink.href = CODEXHOST_RELEASES_LATEST_URL;
-        releaseLink.hidden = false;
-        releaseLink.href = CODEXHOST_RELEASES_LATEST_URL;
+        releaseLink.href = CODEXHOST_RELEASES_URL;
         controls.className = "settings-update-controls";
         panel.dataset.updateState = "unavailable";
         delete panel.dataset.inline;
@@ -575,18 +481,7 @@ function updatesPage(
           ? "settings-update-metadata__value--newer"
           : "";
         installationValue.textContent = installationLabel(result.installation, messages);
-        manualNpm.hidden = result.installation !== "npm";
-        manualWindowsInstaller.hidden = !windows || result.installation !== "windows-installer";
-        releaseLink.hidden = windows;
-        manualTitle.hidden =
-          windows && !["npm", "windows-installer"].includes(result.installation ?? "");
-        if (windows && result.installation === "windows-installer" && result.latestVersion) {
-          manualWindowsInstallerLink.href = windowsInstallerDownloadUrl(
-            document.defaultView,
-            result.latestVersion,
-          );
-        }
-        if (result.releaseNotesUrl) releaseLink.href = result.releaseNotesUrl;
+        releaseLink.href = result.releaseNotesUrl ?? CODEXHOST_RELEASES_URL;
         const operationMessage = statusMessage(result.status, messages);
         if (isPendingStatus(result.status)) {
           renderPendingStatus(result.status, operationMessage ?? messages.updatePreparing);
@@ -597,7 +492,7 @@ function updatesPage(
           result.status?.phase === "failed" && result.status.version === result.latestVersion
             ? result.status
             : null;
-        const view = result.error ? "error" : result.updateAvailable ? "available" : "current";
+        const view = result.updateAvailable ? "available" : result.error ? "error" : "current";
         panel.dataset.updateState = view;
         panel.replaceChildren();
         setManualFallback(Boolean(result.error) || actionableStatus !== null);
@@ -611,10 +506,10 @@ function updatesPage(
             view,
             actionableStatus
               ? (statusMessage(actionableStatus, messages) ?? messages.updateFailed)
-              : result.error
-                ? messages.updateFailed
-                : result.updateAvailable
-                  ? messages.updateAvailable
+              : result.updateAvailable
+                ? messages.updateAvailable
+                : result.error
+                  ? messages.updateFailed
                   : messages.updateUpToDate,
           ),
         );

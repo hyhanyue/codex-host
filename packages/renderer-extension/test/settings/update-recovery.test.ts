@@ -149,7 +149,7 @@ describe("Updates service reconnection", () => {
       await vi.advanceTimersByTimeAsync(RENDERER_UPDATE_STATUS_WAIT_MS);
       expect(view.panel.dataset.updateState).toBe("unavailable");
       expect(view.panel.textContent).toContain(messages.updateResultUnavailable);
-      expect(view.content.textContent).not.toContain(messages.updateManualFallbackDescription);
+      expect(view.content.textContent).not.toContain("npm install -g @codexhost/cli");
       expect(view.panel.querySelector("button")).toBeNull();
       const attempts = client.readUpdateStatus.mock.calls.length;
       pending.resolve({ status: status("succeeded") });

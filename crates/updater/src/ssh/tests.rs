@@ -15,8 +15,6 @@ fn missing_tools_report_specific_failures_before_installation_or_service_changes
         ("install", "node", 45),
         ("install", "npm", 56),
         ("install", "codex", 57),
-        ("update", "node", 45),
-        ("update", "npm", 56),
         ("repair", "node", 45),
         ("repair", "codexhost", 58),
     ] {
@@ -38,7 +36,7 @@ fn missing_tools_report_specific_failures_before_installation_or_service_changes
             std::os::unix::fs::symlink(source, bin.join(tool)).unwrap();
         }
         for tool in ["node", "npm", "codex", "codexhost"] {
-            if tool != missing {
+            if !(action == "install" && tool == "codexhost") && tool != missing {
                 let source = if tool == "node" {
                     "#!/bin/sh\nexit 0\n"
                 } else {
@@ -73,9 +71,13 @@ fn login_environment_finds_tools_despite_a_system_node_and_noisy_startup() {
     std::fs::create_dir_all(&system).unwrap();
     std::fs::create_dir_all(&selected).unwrap();
     executable(&system.join("node"), "#!/bin/sh\nexit 1\n");
-    for tool in ["node", "npm", "codex", "codexhost"] {
+    for tool in ["node", "codex"] {
         executable(&selected.join(tool), "#!/bin/sh\nexit 0\n");
     }
+    executable(
+        &selected.join("npm"),
+        "#!/bin/sh\nprintf '#!/bin/sh\nexit 0\n' > \"$SELECTED_BIN/codexhost\"\nchmod +x \"$SELECTED_BIN/codexhost\"\n",
+    );
     // A shell fixture loads a version manager only when both login and interactive flags
     // are present. Its output exceeds a pipe buffer and contains non-UTF8 bytes.
     let shell = root.join("user shell");
@@ -116,6 +118,7 @@ exec /bin/sh -c "$4"
     // A still-executable recorded runtime wins over the shell default. Unsupported versions
     // stop before installation instead of silently moving the existing service to another npm.
     assert_eq!(run(&system.join("node")).status.code(), Some(55));
+    std::fs::remove_file(selected.join("codexhost")).unwrap();
     std::fs::remove_file(selected.join("codex")).unwrap();
     assert_eq!(run(&root.join("removed-node")).status.code(), Some(57));
     std::fs::remove_dir_all(root).unwrap();
@@ -382,9 +385,10 @@ fn maintenance_finds_tools_beside_the_recorded_node() {
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
     }
     let mut r = request();
-    for (action, version) in [("update", Some("1.2.3")), ("repair", None)] {
+    {
+        let action = "repair";
         r.action = action.into();
-        r.version = version.map(Into::into);
+        r.version = None;
         let run = |node: Option<&std::path::Path>| {
             let mut command = Command::new("/bin/sh");
             command
@@ -456,7 +460,8 @@ fn executes_initial_setup_and_refuses_an_existing_installation() {
     r.action = "install".into();
     r.version = Some("1.2.3".into());
     let mocks = r#"node(){ :; }; npm(){ printf '%s\n' "$*" >> "$HOME/calls"; }; codex(){ :; }; codexhost(){ printf '%s\n' "$*" >> "$HOME/calls"; }; "#;
-    let value = format!("{mocks}{}", script(&r).unwrap());
+    let initial_mocks = r#"node(){ :; }; npm(){ printf '%s\n' "$*" >> "$HOME/calls"; eval 'codexhost(){ echo "$*" >> "$HOME/calls"; }'; }; codex(){ :; }; "#;
+    let value = format!("{initial_mocks}{}", script(&r).unwrap());
     let first = Command::new("sh")
         .args(["-c", &value])
         .env("HOME", &root)
@@ -480,18 +485,13 @@ fn executes_initial_setup_and_refuses_an_existing_installation() {
     assert!(!root.join(".codexhost/ssh-setup.lock").exists());
     r.action = "update".into();
     r.version = Some("1.2.4".into());
-    let update = format!("{mocks}{}", script(&r).unwrap());
-    let updated = Command::new("sh")
-        .args(["-c", &update])
-        .env("HOME", &root)
-        .output()
-        .unwrap();
-    assert!(updated.status.success());
-    let calls = format!(
-        "{calls}view @codexhost/cli@1.2.4 version --fetch-retries=0 --fetch-timeout=30000\nremote stop\ninstall -g @codexhost/cli@1.2.4\nremote install\nremote stop\nremote start\n"
+    assert!(
+        script(&r)
+            .unwrap_err()
+            .to_string()
+            .contains("verified Fork Release")
     );
     assert_eq!(std::fs::read_to_string(root.join("calls")).unwrap(), calls);
-    assert!(!root.join(".codexhost/ssh-setup.lock").exists());
     r.action = "repair".into();
     r.version = None;
     let repair = format!("{mocks}{}", script(&r).unwrap());

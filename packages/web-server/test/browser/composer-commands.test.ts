@@ -37,9 +37,14 @@ for (const width of [390, 1280])
       hasTouch: width < 600,
     });
     const errors: string[] = [];
+    const failedResponses: string[] = [];
+    page.on("response", (response) => {
+      if (response.status() >= 400) failedResponses.push(`${response.status()} ${response.url()}`);
+    });
     page.on("pageerror", (error) => errors.push(error.message));
     page.on("console", (message) => {
-      if (message.type() === "error") errors.push(message.text());
+      if (message.type() === "error")
+        errors.push(`${message.text()} (${message.location().url || "unknown resource"})`);
     });
     await page.goto(url);
     await page.waitForLoadState("networkidle");
@@ -144,5 +149,9 @@ for (const width of [390, 1280])
         "opening menus does not mutate the native session",
       );
     }
-    assert.deepEqual(errors, []);
+    assert.deepEqual(
+      errors,
+      [],
+      `Browser errors; HTTP failures: ${JSON.stringify(failedResponses)}`,
+    );
   });

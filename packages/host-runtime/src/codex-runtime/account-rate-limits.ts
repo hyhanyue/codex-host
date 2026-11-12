@@ -1,5 +1,7 @@
 import { parseHostUsage, type HostUsage } from "@codexhost/harness-adapter";
+import type { AccountCreditsSnapshot } from "@codexhost/shared-contracts";
 import {
+  projectCodexAccountQuota,
   observeCodexRateLimitResetCredits,
   observeCodexRateLimits,
   type CodexRateLimitResetCredits,
@@ -8,6 +10,7 @@ import {
 
 interface AccountSnapshot {
   usage: HostUsage | null;
+  credits: AccountCreditsSnapshot | null;
   resetCredits: CodexRateLimitResetCredits | null;
   observedAt: string | null;
   freshUntil: number;
@@ -15,7 +18,7 @@ interface AccountSnapshot {
 }
 
 export interface AccountRateLimitRefresh {
-  status: "live" | "cached" | "failed";
+  status: "live" | "cached" | "empty" | "failed";
   observedAt: string | null;
 }
 
@@ -25,6 +28,10 @@ export class AccountRateLimits {
 
   get(accountId: string): HostUsage | null {
     return this.#accounts.get(accountId)?.usage ?? null;
+  }
+
+  getCredits(accountId: string): AccountCreditsSnapshot | null {
+    return this.#accounts.get(accountId)?.credits ?? null;
   }
 
   getResetCredits(accountId: string): CodexRateLimitResetCredits | null {
@@ -38,7 +45,7 @@ export class AccountRateLimits {
   #state(accountId: string): AccountSnapshot {
     let state = this.#accounts.get(accountId);
     if (!state) {
-      state = { usage: null, resetCredits: null, observedAt: null, freshUntil: 0 };
+      state = { usage: null, credits: null, resetCredits: null, observedAt: null, freshUntil: 0 };
       this.#accounts.set(accountId, state);
     }
     return state;
@@ -62,7 +69,7 @@ export class AccountRateLimits {
     force = false,
   ): Promise<AccountRateLimitRefresh> {
     const state = this.#state(accountId);
-    if (!force && state.usage && Date.now() < state.freshUntil) {
+    if (!force && state.credits && Date.now() < state.freshUntil) {
       return Promise.resolve({ status: "cached", observedAt: state.observedAt });
     }
     if (state.refresh) return state.refresh;
@@ -73,13 +80,24 @@ export class AccountRateLimits {
         }
         const usage = observeCodexRateLimits(response);
         state.resetCredits = observeCodexRateLimitResetCredits(response);
-        if (!usage) return { status: "failed", observedAt: state.observedAt };
-        state.usage = parseHostUsage({ ...(state.usage ?? {}), ...usage });
+        const credits = projectCodexAccountQuota(response, state.resetCredits);
+        if (!credits) {
+          state.usage = null;
+          state.credits = null;
+          state.observedAt = null;
+          state.freshUntil = 0;
+          return { status: "empty", observedAt: null };
+        }
+        state.credits = credits;
+        state.usage = usage ? parseHostUsage(usage) : null;
         state.observedAt = new Date().toISOString();
         state.freshUntil = Date.now() + 15_000;
         return { status: "live", observedAt: state.observedAt };
       })
-      .catch((): AccountRateLimitRefresh => ({ status: "failed", observedAt: state.observedAt }))
+      .catch((): AccountRateLimitRefresh => {
+        state.freshUntil = 0;
+        return { status: "failed", observedAt: state.observedAt };
+      })
       .finally(() => {
         delete state.refresh;
       });

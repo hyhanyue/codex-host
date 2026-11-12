@@ -39,7 +39,7 @@ import { RendererSessionImportUnavailableError } from "../../src/renderer-sessio
 const HARNESS_SESSION_LIST_METHOD = "codexhost/harness/session-import/list";
 const HARNESS_SESSION_IMPORT_METHOD = "codexhost/harness/session-import/import";
 import {
-  CODEXHOST_RELEASES_LATEST_URL,
+  CODEXHOST_RELEASES_URL,
   createDefaultRendererSettingsPages,
 } from "../../src/settings/pages.js";
 import type {
@@ -222,7 +222,7 @@ function updateCheck(status: UpdateStatus | null = null): UpdateCheckResult {
     updateAvailable: true,
     installationAvailable: true,
     releaseNotes: "Safer updates",
-    releaseNotesUrl: "https://github.com/BytePioneer-AI/codex-host/releases/tag/v1.2.3",
+    releaseNotesUrl: "https://github.com/hyhanyue/codex-host/releases/tag/v1.2.3",
     status,
     error: null,
   };
@@ -2508,7 +2508,11 @@ describe("Renderer Updates page", () => {
     const client = {
       checkUpdate: vi
         .fn<() => Promise<UpdateCheckResult | null>>()
-        .mockResolvedValueOnce({ ...updateCheck(), error: "network down" })
+        .mockResolvedValueOnce({
+          ...updateCheck(),
+          installationAvailable: false,
+          error: "Missing verified asset",
+        })
         .mockResolvedValueOnce(null),
       startUpdate: vi.fn(),
       readUpdateStatus: vi.fn(),
@@ -2530,12 +2534,11 @@ describe("Renderer Updates page", () => {
 
     const panel = elementWithClass(content, "settings-update-panel");
     const metadata = elementWithClass(content, "settings-update-metadata");
-    const manualNpm = descendants(content).find(
-      ({ className }) => className === "settings-update-manual",
-    );
-    await vi.waitFor(() => expect(panel.dataset.updateState).toBe("error"));
+    const releaseLink = elementWithClass(content, "settings-update-link");
+    await vi.waitFor(() => expect(panel.dataset.updateState).toBe("available"));
     expect(visibleText(metadata)).toContain("v1.2.3");
-    expect(manualNpm?.hidden).toBe(false);
+    expect(visibleText(panel)).toContain("Missing verified asset");
+    expect(releaseLink.href).toBe(updateCheck().releaseNotesUrl);
 
     const retry = descendants(panel).find(
       ({ tagName, children }) => tagName === "button" && children.includes("重试"),
@@ -2544,7 +2547,7 @@ describe("Renderer Updates page", () => {
     retry.dispatch("click");
     await vi.waitFor(() => expect(panel.dataset.updateState).toBe("unavailable"));
     expect(visibleText(metadata)).not.toMatch(/v1\.2\.[23]/);
-    expect(manualNpm?.hidden).toBe(true);
+    expect(releaseLink.href).toBe(CODEXHOST_RELEASES_URL);
     expect(elementWithClass(content, "settings-update-controls").className).toBe(
       "settings-update-controls",
     );
@@ -2647,14 +2650,12 @@ describe("Renderer Updates page", () => {
         visibleNotesText(candidate).includes("Download from GitHub Releases"),
     );
     if (!releaseLink) throw new Error("GitHub Releases link is not rendered");
-    expect(releaseLink.href).toBe(CODEXHOST_RELEASES_LATEST_URL);
+    expect(releaseLink.href).toBe(CODEXHOST_RELEASES_URL);
     expect(releaseLink.target).toBe("_blank");
     expect(releaseLink.rel).toBe("noopener noreferrer");
 
     await vi.waitFor(() => {
-      expect(releaseLink.href).toBe(
-        "https://github.com/BytePioneer-AI/codex-host/releases/tag/v1.2.3",
-      );
+      expect(releaseLink.href).toBe("https://github.com/hyhanyue/codex-host/releases/tag/v1.2.3");
     });
 
     const panel = elementWithClass(content, "settings-update-panel");
@@ -2666,9 +2667,7 @@ describe("Renderer Updates page", () => {
       expect(panel.dataset.updateState).toBe("failed");
     });
     expect(descendants(content)).toContain(releaseLink);
-    expect(releaseLink.href).toBe(
-      "https://github.com/BytePioneer-AI/codex-host/releases/tag/v1.2.3",
-    );
+    expect(releaseLink.href).toBe("https://github.com/hyhanyue/codex-host/releases/tag/v1.2.3");
 
     cleanup?.();
     scope.dispose();
@@ -2717,12 +2716,9 @@ describe("Renderer Updates page", () => {
     scope.dispose();
   });
 
-  it.each([
-    ["npm" as const, "如需手动更新，请在终端运行以下命令。"],
-    ["windows-installer" as const, "如需手动更新，请下载并运行适用于当前系统的安装包。"],
-  ])(
-    "offers one-click and manual Windows updates for %s installations",
-    async (installation, expected) => {
+  it.each(["npm", "windows-installer"] as const)(
+    "offers one-click updates and links to the verified Fork Release on Windows for %s",
+    async (installation) => {
       const client = {
         checkUpdate: vi.fn(async () => ({ ...updateCheck(), installation })),
         startUpdate: vi.fn(),
@@ -2744,7 +2740,7 @@ describe("Renderer Updates page", () => {
       });
 
       await vi.waitFor(() => {
-        expect(visibleText(content)).toContain(expected);
+        expect(visibleText(content)).toContain("手动更新");
         expect(visibleText(elementWithClass(content, "settings-update-panel"))).toContain(
           "有新版本可用",
         );
@@ -2754,17 +2750,12 @@ describe("Renderer Updates page", () => {
         ({ tagName }) => tagName === "button",
       );
       expect(update).toBeDefined();
-      if (installation === "npm") {
-        expect(visibleText(content)).toContain("npm install -g @codexhost/cli@latest");
-      } else {
-        const link = descendants(content).find(
-          ({ tagName, href }) =>
-            tagName === "a" &&
-            href ===
-              "https://github.com/BytePioneer-AI/codex-host/releases/download/v1.2.3/codexhost-1.2.3-windows-x64.exe",
-        );
-        expect(link).toMatchObject({ target: "_blank", rel: "noopener noreferrer" });
-      }
+      expect(visibleText(content)).not.toContain("npm install");
+      const link = descendants(content).find(
+        ({ tagName, href }) =>
+          tagName === "a" && href === "https://github.com/hyhanyue/codex-host/releases/tag/v1.2.3",
+      );
+      expect(link).toMatchObject({ target: "_blank", rel: "noopener noreferrer" });
 
       cleanup?.();
       scope.dispose();

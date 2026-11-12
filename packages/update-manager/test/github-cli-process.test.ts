@@ -37,7 +37,7 @@ describe("GitHub CLI process", () => {
       stderr: string,
     ) => void;
     callback(new Error("timed out"), "", "private debug data");
-    await expect(pending).resolves.toBeNull();
+    await expect(pending).resolves.toBeUndefined();
     expect(command).toHaveBeenCalledOnce();
   });
 });

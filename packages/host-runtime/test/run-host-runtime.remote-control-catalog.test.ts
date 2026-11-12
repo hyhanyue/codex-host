@@ -6,6 +6,7 @@ import { PassThrough } from "node:stream";
 import { expect, it, vi } from "vitest";
 
 import type { AppServerHostOptions } from "../src/app-server-host.js";
+import type * as ExternalThreadRepository from "../src/external-thread-repository.js";
 import type * as RemoteAppServer from "../src/remote-app-server.js";
 import type {
   DelegationControlApi,
@@ -19,7 +20,7 @@ const state = vi.hoisted(() => ({
   lists: [] as ReturnType<typeof vi.fn>[],
   result: undefined as DelegationThreadListResult | undefined,
   store: { initialize: vi.fn(async () => {}), close: vi.fn(async () => {}) },
-  scope: {},
+  scope: { permanentHome: "/synthetic/codex-home" },
 }));
 
 vi.mock("../src/app-server-host.js", () => ({
@@ -59,7 +60,8 @@ vi.mock("../src/delegation-skill.js", () => ({ installDelegationSkills: async ()
 vi.mock("../src/installed-harness-plugins.js", () => ({
   installedHarnessPluginOptions: () => ({}),
 }));
-vi.mock("../src/external-thread-repository.js", () => ({
+vi.mock("../src/external-thread-repository.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof ExternalThreadRepository>()),
   createProductionExternalThreadStore: () => state.store,
 }));
 vi.mock("../src/model-prices.js", () => ({
@@ -115,6 +117,7 @@ it("registers the primary Remote Control Host as the catalog for its attached se
   for (const host of state.hosts) {
     expect(host.mappingStore).toBe(state.store);
     expect(host.officialRuntimeScope).toBe(state.scope);
+    expect(host.delegationCatalog).toBe(state.hosts[0]?.delegationCatalog);
   }
   expect(state.lists[0]).toHaveBeenCalledExactlyOnceWith({ limit: 2, sort: "created-desc" });
   expect(state.lists[1]).not.toHaveBeenCalled();

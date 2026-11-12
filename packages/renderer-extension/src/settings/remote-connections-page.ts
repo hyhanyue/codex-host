@@ -508,21 +508,6 @@ export function createRemoteConnectionsPage(
             );
             break;
           }
-          case "upgrade": {
-            const version = remoteInstallVersion(local);
-            if (!version) break;
-            void act(
-              row,
-              action,
-              t("正在更新远程服务，请稍候…", "Updating remote service, please wait…"),
-              async () => {
-                await control.setup(connection, "update", version);
-                await reconnect();
-                return t("远程服务已更新，正在连接", "Remote service updated; connecting");
-              },
-            );
-            break;
-          }
           case "repair":
             void act(
               row,
@@ -583,13 +568,10 @@ export function createRemoteConnectionsPage(
           case "update": {
             const target = row.remote ? remoteMaintenanceTarget(local, row.remote) : null;
             if (!target) break;
-            const restart = target === row.remote?.installedVersion;
             void act(
               row,
               action,
-              restart
-                ? t("正在重启远程服务…", "Restarting remote service…")
-                : t("正在提交更新…", "Starting update…"),
+              t("正在重启远程服务…", "Restarting remote service…"),
               async () => {
                 await control.update(hostId, target);
                 await setConnected(true);

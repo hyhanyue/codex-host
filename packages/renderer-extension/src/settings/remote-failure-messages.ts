@@ -69,13 +69,8 @@ export const REMOTE_FAILURE_CHINESE: Readonly<Record<string, string>> = Object.f
     "另一项 codexhost 更新正在进行，请等它完成后重试",
   "The remote installation changed before the update acquired its lock; refresh and retry":
     "更新开始前远程安装发生了变化，请刷新后重试",
-  "Could not identify the global npm installation": "无法识别远程电脑的全局 npm 安装",
-  "npm uses a different global installation; update this remote manually":
-    "远程电脑的 npm 使用了另一处全局安装，请在远程电脑上手动更新",
-  "The requested release is unavailable or npm cannot reach the registry":
-    "目标版本不存在，或远程电脑无法访问 npm 仓库",
-  "npm installation failed; check remote network access and write permissions":
-    "npm 安装失败，请检查远程电脑的网络和写入权限",
+  "Install the verified Fork Release on the remote computer before restarting":
+    "请先在远程电脑上安装已验证的 Fork Release，再重新启动服务",
   "Installed remote version does not match the requested version":
     "远程安装的版本与请求的版本不一致",
   "Remote stop failed": "更新已安装，但停止旧服务失败",

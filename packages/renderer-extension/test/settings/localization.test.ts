@@ -42,14 +42,10 @@ describe("Renderer settings localization", () => {
     expect(chinese.updateWaitingForExit).toBe("正在等待应用退出...");
     expect(chinese.updateInstallingNpm).toBe("正在通过 npm 安装...");
     expect(chinese.updateAndRestart).toBe("更新");
-    expect(chinese.updateWindowsInstallerDescription).toContain("适用于当前系统的安装包");
-    expect(chinese.updateManualNpmDescription).toBe(
-      "如需手动更新，请在终端运行以下命令。更新完成后，请退出 Codex 并通过 codexhost 重新启动。",
-    );
+    expect(chinese.updateManualTitle).toBe("手动更新");
     expect(english.updateInstalling).toBe("Installing update...");
     expect(english.updateDownloadFromReleases).toBe("Download from GitHub Releases");
     expect(chinese.updateDownloadFromReleases).toBe("前往 GitHub Releases 下载");
-    expect(chinese.updateDownloadWindowsInstaller).toBe("下载 Windows 安装包");
     expect(chinese.updateStarCallout).toBe(
       "如果 CodexHost 帮到了你，请在 GitHub 点个 Star，这对我们意义重大 👉",
     );

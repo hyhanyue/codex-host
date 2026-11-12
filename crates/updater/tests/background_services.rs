@@ -7,6 +7,8 @@ use std::process::{Child, Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use sha2::{Digest, Sha256};
+
 struct Fixture {
     root: PathBuf,
     owner: Child,
@@ -45,13 +47,19 @@ printf 'Host stopped; interrupted tasks: 7\n<opaque output>\n'
             "set -eu\nprintf 'relaunch\\n' >> \"$HOME/order\"\ntouch \"$HOME/web-running\" \"$HOME/host-running\"\nprintf '%s' '{}' > \"$HOME/runtime.json\"\n",
             serde_json::json!({ "schema_version":1, "launcher_pid":std::process::id(), "control_port":4468, "nonce":"a".repeat(32) })
         )).unwrap();
+        let artifact = b"verified fork npm package";
+        fs::write(root.join("meta.tgz"), artifact).unwrap();
+        fs::write(root.join("platform.tgz"), artifact).unwrap();
+        let artifact_sha256 = format!("{:x}", Sha256::digest(artifact));
         let owner = Command::new("/bin/sleep").arg("60").spawn().unwrap();
         fs::write(root.join("request.json"), serde_json::to_vec(&serde_json::json!({
             "schema_version": 1, "version":"1.2.3", "wait_pid":owner.id(),
             "wait_executable":"/bin/sleep", "runtime_descriptor_path":root.join("runtime.json"),
             "status_path":root.join("status.json"), "installation": {
                 "kind":"npm", "node_path":"/bin/sh", "npm_cli_path":root.join("install.sh"),
-                "npm_launcher_path":root.join("launch.sh"), "npm_package_root":root.join("package")
+                "npm_launcher_path":root.join("launch.sh"), "npm_package_root":root.join("package"),
+                "meta_path":root.join("meta.tgz"), "meta_sha256":artifact_sha256,
+                "platform_path":root.join("platform.tgz"), "platform_sha256":artifact_sha256,
             }
         })).unwrap()).unwrap();
         Self { root, owner }

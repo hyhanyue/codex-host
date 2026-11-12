@@ -1,6 +1,7 @@
 import {
   accountCreditsSnapshotSchema,
   type AccountCreditsSnapshot,
+  type HarnessAccountUnavailableReason,
 } from "@codexhost/shared-contracts";
 
 /** Legacy caches can carry a private fetch timestamp; it is not quota presentation data. */
@@ -10,4 +11,11 @@ export function parseHarnessAccountCredits(value: unknown): AccountCreditsSnapsh
   delete publicValue.fetchedAt;
   const parsed = accountCreditsSnapshotSchema.safeParse(publicValue);
   return parsed.success ? parsed.data : null;
+}
+
+/** Safe account inspection outcome; Host only forwards the validated reason. */
+export class HarnessAccountInspectionError extends Error {
+  constructor(readonly accountUnavailableReason: HarnessAccountUnavailableReason) {
+    super("Native account quota is unavailable");
+  }
 }

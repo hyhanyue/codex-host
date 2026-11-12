@@ -87,6 +87,8 @@ export interface CreateSessionInput {
   cwd: string;
   environment?: Record<string, string | undefined>;
   executionPolicy?: HarnessExecutionPolicy;
+  /** Explicit Composer settings must survive native readback before the first Turn is accepted. */
+  requireExactConfiguration?: boolean;
   model?: HarnessModelRef;
   thinkingOptionId?: HarnessThinkingOptionId;
   permissionModeId?: HarnessPermissionModeId;
