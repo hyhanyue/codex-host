@@ -1,4 +1,3 @@
-# Temporary pure-upstream baseline; never merge into main.
 name: Verify upstream sync on macOS
 on:
   push:
@@ -6,11 +5,22 @@ on:
 permissions:
   contents: read
 jobs:
-  browser-baseline:
+  targeted:
+    strategy:
+      fail-fast: false
+      matrix:
+        source: [candidate, upstream]
     runs-on: macos-26
-    timeout-minutes: 45
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
+      - name: Select pure upstream production sources
+        if: matrix.source == 'upstream'
+        run: |
+          cp packages/web-server/test/browser/delegation-agent-menu.test.ts /tmp/delegation-diagnostic.ts
+          git fetch origin 31dc2068ed3eecc40c8222777f18339d1bc39d30
+          git checkout 31dc2068ed3eecc40c8222777f18339d1bc39d30
+          cp /tmp/delegation-diagnostic.ts packages/web-server/test/browser/delegation-agent-menu.test.ts
       - uses: actions/setup-node@v4
         with:
           node-version-file: .node-version
@@ -23,6 +33,19 @@ jobs:
       - run: npm run build:typescript
       - run: npx playwright install chromium
       - run: npm run build:web:ui
-      - name: Candidate browser targeted diagnosis
+      - name: Validate auth status compatibility fix
+        if: matrix.source == 'candidate'
         working-directory: packages/web-server
-        run: node --import tsx --test test/browser/access-tokens.test.ts test/browser/ch-cache-navigation.test.ts test/browser/ch-compaction.test.ts test/browser/ch-resume-stream.test.ts test/browser/ch-scoped-projections.test.ts test/browser/ch-session-cache.test.ts test/browser/ch-session-import.test.ts test/browser/composer-commands.test.ts test/browser/connect-controls.test.ts test/browser/delegation-agent-menu.test.ts test/browser/desktop-screenshot.test.ts test/browser/file-mentions.test.ts test/browser/harness-icons.test.ts test/browser/harness-order.test.ts test/browser/markdown-compatibility.test.ts test/browser/model-selection.test.ts test/browser/phone-sidebar-layering.test.ts test/browser/phone-sidebar.test.ts test/browser/preferences.test.ts test/browser/relay-tool-output.test.ts test/browser/right-sidebar-touch.test.ts test/browser/voice-recorder-layout.test.ts
+        run: node --import tsx --test test/auth-status-http.test.ts test/browser/composer-commands.test.ts test/browser/file-mentions.test.ts
+      - name: Repeat isolated delegation and relay tests
+        if: always()
+        working-directory: packages/web-server
+        run: |
+          failed=0
+          for attempt in 1 2 3; do
+            echo "=== isolated delegation attempt $attempt ==="
+            node --import tsx --test test/browser/delegation-agent-menu.test.ts || failed=1
+            echo "=== isolated relay attempt $attempt ==="
+            node --import tsx --test test/browser/relay-tool-output.test.ts || failed=1
+          done
+          exit $failed

@@ -521,6 +521,12 @@ const server = createWebServer((request, response) => {
       const admission = await auth.gate(request, response, pathname);
       if (admission.handled) return;
       requestAuth = admission.auth;
+    } else if (pathname === "/api/auth/status" && request.method === "GET") {
+      // --no-auth still serves the reachability probe, without claiming a local credential.
+      response
+        .writeHead(200, { "content-type": "application/json", "cache-control": "no-store" })
+        .end(JSON.stringify({ authenticated: false, local: false }));
+      return;
     }
     if (pathname === "/api/file" && (request.method === "GET" || request.method === "HEAD")) {
       const path = new URL(url, "http://localhost").searchParams.get("path");
