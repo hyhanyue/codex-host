@@ -5,6 +5,7 @@ import type {
 import {
   HARNESS_PREFERENCES_CHANGED_METHOD,
   HARNESS_DISPLAY_CHANGED_METHOD,
+  SKILLS_CHANGED_METHOD,
 } from "@codexhost/shared-contracts";
 import {
   createRendererModelClient,
@@ -79,6 +80,7 @@ export function createRendererHostClients(
                   CODEX_ACCOUNT_CHANGED_METHOD,
                   HARNESS_PREFERENCES_CHANGED_METHOD,
                   HARNESS_DISPLAY_CHANGED_METHOD,
+                  SKILLS_CHANGED_METHOD,
                 ].filter((method) => requested.includes(method));
                 if (!messages || relayed.length === 0) return () => unsubscribe?.();
                 // Like manual compaction, observe the real Host frame before Desktop's

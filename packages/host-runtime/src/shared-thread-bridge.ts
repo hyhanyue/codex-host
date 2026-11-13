@@ -11,6 +11,7 @@ import {
   COMPOSER_DELEGATE_METHOD,
   HANDOFF_PREVIEW_METHOD,
   HANDOFF_SEND_METHOD,
+  SKILLS_LIST_METHOD,
 } from "@codexhost/shared-contracts";
 import {
   storedSectionPlacementV1Schema,
@@ -160,9 +161,12 @@ export class SharedThreadBridge {
   handlesControl(method: string): boolean {
     return (
       this.options.delegateCreates &&
-      [LOADED_SESSIONS_METHOD, IDLE_RELEASE_SETTINGS_METHOD, USAGE_STATISTICS_METHOD].some(
-        (value) => value === method,
-      )
+      [
+        LOADED_SESSIONS_METHOD,
+        IDLE_RELEASE_SETTINGS_METHOD,
+        USAGE_STATISTICS_METHOD,
+        SKILLS_LIST_METHOD,
+      ].some((value) => value === method)
     );
   }
 

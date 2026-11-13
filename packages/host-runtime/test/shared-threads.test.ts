@@ -50,6 +50,11 @@ function setup() {
     stockCodexPath: "/unused",
     arguments: [],
     externalOnly: true,
+    environment: {
+      HOME: directory,
+      CODEX_HOME: path.join(directory, "codex"),
+      CODEXHOST_DATA_DIR: directory,
+    },
     desktopInput: owner.input,
     desktopOutput: owner.output,
     diagnosticOutput,
