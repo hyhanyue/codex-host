@@ -293,7 +293,7 @@ test("invalidates an open Codex catalog when the effective account changes", asy
   await expect(model(page)).toBeHidden();
 });
 
-test("drops warm external catalogs after credential operations or foreground changes", async ({
+test("retains warm catalogs across foreground changes and invalidates credential changes", async ({
   page,
 }) => {
   await page.evaluate(() => catalogFixture.open("pi"));
@@ -303,21 +303,20 @@ test("drops warm external catalogs after credential operations or foreground cha
   await page.evaluate(() => catalogFixture.open("pi"));
   await expect(model(page)).toBeVisible();
   await page.evaluate(() => window.dispatchEvent(new Event("focus")));
-  await expect(model(page)).toBeHidden();
+  await expect(model(page)).toBeVisible();
+  expect(await page.evaluate(() => catalogFixture.calls())).toHaveLength(1);
   await page.evaluate(() => catalogFixture.changeCredentials());
   await expect(model(page)).toBeHidden();
-  expect(await page.evaluate(() => catalogFixture.calls())).toHaveLength(2);
-  await complete(page, 1, [["late-old-credentials", ["low"]]]);
-  await expect.poll(() => page.evaluate(() => catalogFixture.calls())).toHaveLength(3);
-  await expect(model(page)).toBeHidden();
-  await complete(page, 2, [["new-credentials", ["low"]]]);
+  await expect.poll(() => page.evaluate(() => catalogFixture.calls())).toHaveLength(2);
+  await complete(page, 1, [["new-credentials", ["low"]]]);
   await expect(model(page).locator("option", { hasText: "new-credentials" })).toHaveCount(1);
   await cancel(page).click();
   await page.evaluate(() => {
     window.dispatchEvent(new Event("blur"));
     catalogFixture.open("pi");
   });
-  await expect(model(page)).toBeHidden();
+  await expect(model(page)).toBeVisible();
+  expect(await page.evaluate(() => catalogFixture.calls())).toHaveLength(2);
 });
 
 test("retains the last successful snapshot after failure and retries", async ({ page }) => {
@@ -329,9 +328,11 @@ test("retains the last successful snapshot after failure and retries", async ({ 
   await expect(apply(page)).toBeEnabled();
   await model(page).selectOption("old");
   await page.evaluate(() => catalogFixture.reject(0));
-  await expect(page.getByRole("status")).toContainText("Agent temporarily unavailable");
+  await expect(page.getByRole("status")).toBeHidden();
   await expect(apply(page)).toBeEnabled();
   await expect(model(page)).toHaveValue("old");
+  await page.clock.install();
+  await page.clock.fastForward(30_001);
   await page.getByRole("button", { name: "Codex", exact: true }).click();
   await expect(model(page)).toHaveValue("old");
   await complete(page, 1, [["recovered", ["low"]]]);

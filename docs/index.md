@@ -213,3 +213,5 @@
 | [`archive/harness-discovery-pre-2df7058/01-desktop-install-discovery-notes.md`](archive/harness-discovery-pre-2df7058/01-desktop-install-discovery-notes.md) | 早期 Desktop 与 codexhost 原生安装发现分析。 |
 | [`archive/harness-discovery-pre-2df7058/02-per-adapter-harness-discovery-notes.md`](archive/harness-discovery-pre-2df7058/02-per-adapter-harness-discovery-notes.md) | 公共发现包实施前各 Adapter 独立发现 CLI 的代码形态。 |
 | [`archive/harness-discovery-pre-2df7058/03-invalidated-conclusions.md`](archive/harness-discovery-pre-2df7058/03-invalidated-conclusions.md) | 已失效或需要限定条件的早期结论与当前事实。 |
+
+- [共用 Codex 记忆](product/shared-memory.md)：统一规则、长期事实、跨 Agent 读写与本机聊天历史检索。

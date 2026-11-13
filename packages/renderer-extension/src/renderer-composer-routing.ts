@@ -528,7 +528,15 @@ export function mountComposerRouting(
       if (!current || routingScope(current) !== panelScope) return;
       const catalogScope = scopeFor(current);
       const { key, cacheable, changingCredentials, persistent } = catalogScope;
-      if (!retry && loaded?.client === current.client && loaded.key === key) return;
+      if (
+        !retry &&
+        loaded?.client === current.client &&
+        loaded.key === key &&
+        (!delegationCatalogCache(current.client).read(key) ||
+          delegationCatalogCache(current.client).isFresh(key) ||
+          delegationCatalogCache(current.client).isRefreshing(key))
+      )
+        return;
       const request = { client: current.client, key };
       loaded = request;
       const catalogScopeIsCurrent = () => {
@@ -579,6 +587,12 @@ export function mountComposerRouting(
             return;
           }
           const scopeChanged = error instanceof DelegationCatalogScopeChanged;
+          if (!scopeChanged && inspection) {
+            // A background refresh failure must not interrupt a usable warm menu.
+            catalogError = undefined;
+            renderSelections();
+            return;
+          }
           if (scopeChanged) {
             inspection = undefined;
             body.hidden = true;

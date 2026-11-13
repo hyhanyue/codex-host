@@ -9,6 +9,7 @@ import type {
 import type { RendererCodexAccountState } from "./renderer-codex-account-state.js";
 import type { RendererModelClient } from "./renderer-model-client.js";
 import { RendererMethodUnavailableError } from "./renderer-request-sender.js";
+import type { RendererRequestOptions } from "./renderer-request-sender.js";
 
 type Catalog = Extract<HarnessInspection, { status: "ready" }>;
 type Location = { threadId: HostThreadId } | { cwd: string };
@@ -22,39 +23,22 @@ interface CatalogScope {
 
 export class DelegationCatalogScopeChanged extends Error {}
 
-const maxAgeMs = 60_000;
+const maxAgeMs = 60 * 60_000;
+const retryDelayMs = 30_000;
 const maxEntries = 32;
 const credentialsChanged = "codexhost:delegation-credentials-changed";
-let nextForegroundRevision = 0;
-const foregroundEpochs = new WeakMap<Document, { revision: number }>();
 const credentialEpochs = new WeakMap<
   RendererModelClient["inspectHarness"],
   Map<string, { revision: number; pending: number }>
 >();
 
-function foregroundRevision(document: Document): number {
-  let epoch = foregroundEpochs.get(document);
-  if (!epoch) {
-    const state = { revision: ++nextForegroundRevision };
-    const invalidate = () => {
-      state.revision = ++nextForegroundRevision;
-    };
-    document.defaultView?.addEventListener("blur", invalidate);
-    document.defaultView?.addEventListener("focus", invalidate);
-    document.addEventListener("visibilitychange", invalidate);
-    foregroundEpochs.set(document, (epoch = state));
-  }
-  return epoch.revision;
-}
-
 export function subscribeDelegationCatalogInvalidation(
   document: Document,
   listener: () => void,
+  onFocus = true,
 ): () => void {
-  // Register the epoch update before the UI rereads its scope.
-  foregroundRevision(document);
   const window = document.defaultView;
-  window?.addEventListener("focus", listener);
+  if (onFocus) window?.addEventListener("focus", listener);
   window?.addEventListener(credentialsChanged, listener);
   return () => {
     window?.removeEventListener("focus", listener);
@@ -82,11 +66,11 @@ export function beginDelegationCatalogCredentialChange(
 }
 
 export function delegationCatalogScope(
-  document: Document,
+  _document: Document,
   client: RendererModelClient,
   hostId: string,
   harnessId: HarnessId,
-  location: Location,
+  location: Location | undefined,
   pluginVersion: string | undefined,
   accounts: RendererCodexAccountState | null | undefined,
 ): CatalogScope {
@@ -96,8 +80,9 @@ export function delegationCatalogScope(
   );
   const credentials = credentialEpochs.get(client.inspectHarness)?.get(harnessId);
   const changingCredentials = Boolean(credentials?.pending);
-  // Native external logins are owned by the Harness. Discard their warm snapshots
-  // across foreground changes as well as credential operations made here.
+  // Cache identity follows the Host, workspace, plugin and Account, not window focus.
+  // Credential operations invalidate immediately; native external login changes
+  // are picked up by the next hourly refresh or an explicit refresh.
   const accountScope =
     harnessId === "codex"
       ? [
@@ -110,9 +95,10 @@ export function delegationCatalogScope(
           account?.planType,
         ]
       : credentials?.revision;
-  const target = [hostId, harnessId, location];
+  const target = [hostId, harnessId, location ?? null];
   const persistent =
     harnessId === "codex" &&
+    location &&
     client.delegationCatalog &&
     ownAccounts?.instanceId &&
     account &&
@@ -126,7 +112,7 @@ export function delegationCatalogScope(
         }
       : undefined;
   return {
-    key: JSON.stringify([...target, pluginVersion, foregroundRevision(document), accountScope]),
+    key: JSON.stringify([...target, pluginVersion, accountScope]),
     targetKey: JSON.stringify(target),
     cacheable: !changingCredentials && (harnessId !== "codex" || ownAccounts?.phase === "ready"),
     changingCredentials,
@@ -146,6 +132,7 @@ interface Entry {
   catalog?: Catalog;
   refreshed: boolean;
   expiresAt: number;
+  retryAt?: number;
 }
 
 class DelegationCatalogCache {
@@ -159,11 +146,24 @@ class DelegationCatalogCache {
     return this.#entry(key)?.catalog;
   }
 
+  isFresh(key: string): boolean {
+    const entry = this.#entry(key);
+    return Boolean(
+      entry?.catalog &&
+      ((entry.refreshed && entry.expiresAt > Date.now()) ||
+        (entry.retryAt !== undefined && entry.retryAt > Date.now())),
+    );
+  }
+
+  isRefreshing(key: string): boolean {
+    return [...this.#flights.values()].some((flight) => flight.key === key);
+  }
+
   #entry(key: string): Entry | undefined {
     const entry = this.#entries.get(key);
     if (!entry) return undefined;
     this.#entries.delete(key);
-    if (entry.expiresAt <= Date.now()) return undefined;
+    // Keep expired snapshots visible while refresh() replaces them in the background.
     this.#entries.set(key, entry);
     return entry;
   }
@@ -209,9 +209,11 @@ class DelegationCatalogCache {
     { key, targetKey, cacheable, persistent }: CatalogScope,
     input: HarnessInspectParams,
     stillInScope: () => boolean,
+    options?: RendererRequestOptions,
   ): Promise<Catalog> {
     const cached = this.#entry(key);
-    if (cached?.refreshed && cached.catalog) return Promise.resolve(cached.catalog);
+    if (input.refresh !== true && cached?.catalog && this.isFresh(key))
+      return Promise.resolve(cached.catalog);
     const active = this.#flights.get(targetKey);
     if (active?.key === key) return active.result;
     // Some Adapters coalesce refreshes for the same workspace. Let the previous
@@ -233,7 +235,10 @@ class DelegationCatalogCache {
             if (!(error instanceof RendererMethodUnavailableError)) throw error;
           }
         }
-        return this.client.inspectHarness({ ...input, refresh: true });
+        const params = { ...input, refresh: true };
+        return options
+          ? this.client.inspectHarness(params, options)
+          : this.client.inspectHarness(params);
       })
       .then((inspection) => {
         if (inspection.status !== "ready") throw new Error(inspection.error.message);
@@ -249,6 +254,8 @@ class DelegationCatalogCache {
       .catch((error: unknown) => {
         if (error instanceof DelegationCatalogScopeChanged && isLatest() && stillInScope())
           this.#entries.delete(key);
+        else if (cached?.catalog && isLatest() && stillInScope())
+          cached.retryAt = Date.now() + retryDelayMs;
         throw error;
       })
       .finally(() => {

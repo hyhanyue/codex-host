@@ -1,3 +1,4 @@
+import { prepareSharedMemoryInput, recordSharedMemoryOutput } from "./shared-memory/bridge.mjs";
 import {
   COMPOSER_DELEGATE_METHOD,
   DELEGATION_CATALOG_METHOD,
@@ -3272,7 +3273,11 @@ export class AppServerHost {
     const gate = turnProjectionGate();
     let committed = false;
     try {
-      const accepted = await acceptHandoff(session, summary, text);
+      const accepted = await acceptHandoff(
+        session,
+        summary,
+        prepareSharedMemoryInput({ id: threadId, cwd, harnessId }, text, `handoff:${requestId}`),
+      );
       const { state, turnId } = accepted;
       const label = (id: string) =>
         id === "codex"
@@ -5130,7 +5135,7 @@ export class AppServerHost {
     const result = await thread.session.execute({
       type: "turn.start",
       turnId,
-      input: [{ type: "text", text }],
+      input: [{ type: "text", text: prepareSharedMemoryInput(thread, text, turnId) }],
     });
     if (!result.ok) {
       thread.running = false;
@@ -5721,7 +5726,12 @@ export class AppServerHost {
       const result = await thread.session.execute({
         type: "turn.start",
         turnId,
-        input: [{ type: "text", text: rewriteDelegationMentionText(text) }],
+        input: [
+          {
+            type: "text",
+            text: prepareSharedMemoryInput(thread, rewriteDelegationMentionText(text), turnId),
+          },
+        ],
       });
       if (!result.ok) throw new ExternalSteerError(-32073, result.error.message);
       await this.#externalRuntime.capturePreview(thread, projection.projector.snapshotTurn());
@@ -5859,6 +5869,7 @@ export class AppServerHost {
       return;
     }
     let event = output.event;
+    recordSharedMemoryOutput(thread, event);
     if (this.#meterTurnTiming(thread, event)) await this.#notifyThreadUsage(thread);
     if (event.type === "item.started" && event.item.type === "subagentDelegation") {
       event = {

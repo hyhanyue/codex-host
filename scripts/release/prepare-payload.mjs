@@ -280,6 +280,20 @@ export async function writeThirdPartyNotices(root, payloadRoot) {
   );
 }
 
+export const sharedMemoryRuntimePaths = ["store.mjs", "history.mjs", "bridge.mjs", "cli.mjs"].map(
+  (file) => `app/shared-memory/${file}`,
+);
+
+export async function copySharedMemoryRuntime(root, destination) {
+  for (const relative of sharedMemoryRuntimePaths) {
+    await copyReleaseFile(
+      path.join(root, "packages/host-runtime/src/shared-memory", path.basename(relative)),
+      path.join(destination, relative),
+      "shared Codex memory runtime",
+    );
+  }
+}
+
 export function expectedPayloadPaths(target) {
   const paths = [
     ...expectedWebPaths(target),
@@ -294,6 +308,7 @@ export function expectedPayloadPaths(target) {
     "app/desktop-controller.mjs",
     "app/host-runtime.mjs",
     "app/renderer-extension.js",
+    ...sharedMemoryRuntimePaths,
     ...preinstalledHarnessPluginPaths(),
     "licenses/Node.js-LICENSE.txt",
     "licenses/Copilot-SDK-LICENSE.txt",
@@ -439,6 +454,7 @@ export async function prepareReleasePayload({ target, root = repositoryRoot }) {
     },
     root,
   );
+  await copySharedMemoryRuntime(root, payloadRoot);
   await buildPreinstalledHarnessPlugins({
     repositoryRoot: root,
     outputDirectory: path.join(payloadRoot, "app", "plugins"),

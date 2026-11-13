@@ -97,6 +97,7 @@ interface ThinkingOptionControl {
 }
 
 export interface RendererModelPickerControl {
+  onOpen?: () => void;
   root: HTMLElement;
   fast: RendererModelFastControl;
   trigger: HTMLButtonElement;
@@ -354,14 +355,20 @@ function syncFavorite(option: ModelOptionControl, favorite: boolean): void {
 }
 
 function orderModelFavorites(control: RendererModelPickerControl): void {
-  // Map iteration preserves the Harness catalog order within each partition.
-  for (const favorite of [true, false]) {
-    for (const [id, option] of control.options) {
-      const isFavorite = control.favorites.has(id);
-      syncFavorite(option, isFavorite);
-      option.favorite.disabled = modelFavoritesPending(control.harnessId);
-      if (isFavorite === favorite) control.modelMenu.append(option.row);
-    }
+  const pending = modelFavoritesPending(control.harnessId);
+  const favorites: HTMLElement[] = [];
+  const others: HTMLElement[] = [];
+  for (const [id, option] of control.options) {
+    const favorite = control.favorites.has(id);
+    if (option.favorite.getAttribute("aria-pressed") !== String(favorite))
+      syncFavorite(option, favorite);
+    if (option.favorite.disabled !== pending) option.favorite.disabled = pending;
+    (favorite ? favorites : others).push(option.row);
+  }
+  let previous = control.searchEmpty;
+  for (const row of [...favorites, ...others]) {
+    if (previous.nextElementSibling !== row) previous.after(row);
+    previous = row;
   }
 }
 
@@ -566,6 +573,7 @@ export function mountRendererModelPicker(
     modelMenu.showPopover();
     positionModelMenu(control, standalone);
     modelButton.setAttribute("aria-expanded", "true");
+    control.onOpen?.();
   };
   const open = (): void => {
     if (trigger.disabled || pickerOpen()) return;
@@ -935,8 +943,9 @@ export function renderRendererModelPicker(
   // focused element blurs it, which would drop the cursor out of the box during
   // transient states (e.g. "selecting"). Filtering is client-side and safe.
 
+  const selectedModelId = catalogModelForRef(view.catalog, view.selected)?.ref.id;
   for (const [modelId, option] of control.options) {
-    const selected = modelId === catalogModelForRef(view.catalog, view.selected)?.ref.id;
+    const selected = modelId === selectedModelId;
     option.button.setAttribute("aria-checked", String(selected));
     option.button.classList.toggle("bg-token-list-hover-background", selected);
     option.button.disabled = control.trigger.disabled;

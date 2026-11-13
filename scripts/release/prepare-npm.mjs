@@ -20,6 +20,7 @@ import {
   buildPreinstalledHarnessPlugins,
   preinstalledHarnessPluginPaths,
 } from "./harness-plugins.mjs";
+import { copySharedMemoryRuntime, sharedMemoryRuntimePaths } from "./prepare-payload.mjs";
 import { linuxGlibcCargoArguments, stripLinuxDebugInfo } from "./linux-glibc.mjs";
 import { hostReleaseTarget, npmReleaseUsage, releaseTargetForHost } from "./targets.mjs";
 
@@ -286,6 +287,7 @@ export function expectedNpmPackagePaths(target) {
     "app/desktop-controller.mjs",
     "app/host-runtime.mjs",
     "app/renderer-extension.js",
+    ...sharedMemoryRuntimePaths,
     ...preinstalledHarnessPluginPaths(),
     "licenses/Anthropic-SDK-LICENSE.txt",
     "licenses/Agent-Client-Protocol-SDK-LICENSE.txt",
@@ -1235,6 +1237,7 @@ export async function prepareNpmPackage({
     },
     root,
   );
+  await copySharedMemoryRuntime(root, packageRoot);
   await buildPreinstalledHarnessPlugins({
     repositoryRoot: root,
     outputDirectory: path.join(packageRoot, "app", "plugins"),
