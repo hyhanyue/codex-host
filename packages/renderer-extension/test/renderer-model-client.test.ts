@@ -1,4 +1,5 @@
 import {
+  SKILLS_CHANGED_METHOD,
   HARNESS_INSTALLATION_START_METHOD,
   HARNESS_LAUNCH_SETTINGS_GET_METHOD,
   HARNESS_LAUNCH_SETTINGS_SET_METHOD,
@@ -243,6 +244,38 @@ describe("Renderer fixed Model request client", () => {
     expect(remove).toHaveBeenCalledTimes(2);
   });
 
+  it("keeps skill-change subscriptions separate from fork Account notifications", () => {
+    const callbacks = new Map<string, (notification: unknown) => void>();
+    const remove = vi.fn();
+    const client = createRendererModelClient([
+      {
+        sendRequest: vi.fn(),
+        addNotificationCallback(
+          method: string | readonly string[],
+          callback: (value: unknown) => void,
+        ) {
+          if (typeof method === "string") callbacks.set(method, callback);
+          return remove;
+        },
+      },
+    ]);
+    const skillsListener = vi.fn();
+    const accountListener = vi.fn();
+    const unsubscribeSkills = client?.subscribeSkillsChanged?.(skillsListener);
+    const unsubscribeAccounts = client?.subscribeCodexAccounts?.(accountListener);
+    expect([...callbacks.keys()]).toEqual([SKILLS_CHANGED_METHOD, CODEX_ACCOUNT_CHANGED_METHOD]);
+
+    const notifySkills = callbacks.get(SKILLS_CHANGED_METHOD);
+    notifySkills?.({ method: SKILLS_CHANGED_METHOD, params: { cwd: "/project" } });
+    notifySkills?.({ method: SKILLS_CHANGED_METHOD, params: { cwd: "" } });
+    notifySkills?.({ method: CODEX_ACCOUNT_CHANGED_METHOD, params: {} });
+    expect(skillsListener).toHaveBeenCalledExactlyOnceWith({ cwd: "/project" });
+    expect(accountListener).not.toHaveBeenCalled();
+    unsubscribeSkills?.();
+    unsubscribeAccounts?.();
+    expect(remove).toHaveBeenCalledTimes(2);
+  });
+
   it("reads and validates progressive read-only accounts from the bound Host", async () => {
     const account = {
       harnessId: "sample-agent",
@@ -444,6 +477,7 @@ describe("Renderer fixed Model request client", () => {
       "listHarnessSessions",
       "listLoadedSessions",
       "listSessionImportSources",
+      "listSkills",
       "listThreadOwnership",
       "openConsole",
       "openHarnessWebUi",
@@ -466,6 +500,7 @@ describe("Renderer fixed Model request client", () => {
       "subscribeCodexAccounts",
       "subscribeHarnessDisplaySettings",
       "subscribeHarnessPreferences",
+      "subscribeSkillsChanged",
       "subscribeThreadUsage",
       "updateRemote",
     ]);

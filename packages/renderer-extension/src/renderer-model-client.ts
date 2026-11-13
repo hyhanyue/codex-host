@@ -21,6 +21,14 @@ import {
   type HandoffSendResult,
 } from "@codexhost/shared-contracts";
 import {
+  SKILLS_LIST_METHOD,
+  SKILLS_CHANGED_METHOD,
+  skillsListParamsSchema,
+  skillsListResultSchema,
+  skillsChangedParamsSchema,
+  type SkillsListParams,
+  type SkillsListResult,
+  type SkillsChangedParams,
   DELEGATION_READ_METHOD,
   delegationReadParamsSchema,
   type DelegationReadParams,
@@ -256,6 +264,8 @@ export interface RendererModelClient extends Partial<RendererSessionImportClient
   currentHostId?(composer?: Element): string | null;
   knownHostIds?(): readonly string[];
   listHarnessPlugins?(): Promise<HarnessPluginListResult>;
+  listSkills?(params: SkillsListParams): Promise<SkillsListResult>;
+  subscribeSkillsChanged?(listener: (params: SkillsChangedParams) => void): () => void;
   clientForHost?(hostId: string): RendererModelClient | null;
   forkThread(input: ExternalThreadForkParams): Promise<ExternalThreadForkResult>;
   inspectHarness(
@@ -550,6 +560,20 @@ export function createRendererModelClient(
           delegationCatalogParamsSchema.parse(input),
           { priority: input.action === "snapshot" ? "interactive" : "background" },
         ),
+      );
+    },
+    async listSkills(params: SkillsListParams): Promise<SkillsListResult> {
+      return skillsListResultSchema.parse(
+        await manager.sendRequest(SKILLS_LIST_METHOD, skillsListParamsSchema.parse(params)),
+      );
+    },
+    subscribeSkillsChanged(listener: (params: SkillsChangedParams) => void) {
+      return (
+        notificationTarget(source)?.addNotificationCallback?.(SKILLS_CHANGED_METHOD, (value) => {
+          if (!isRecord(value) || value.method !== SKILLS_CHANGED_METHOD) return;
+          const parsed = skillsChangedParamsSchema.safeParse(value.params);
+          if (parsed.success) listener(parsed.data);
+        }) ?? (() => {})
       );
     },
     async listHarnessPlugins(): Promise<HarnessPluginListResult> {
