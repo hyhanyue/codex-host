@@ -6,6 +6,7 @@ import { mountComposerRouting } from "./renderer-composer-routing.js";
 import {
   delegationCatalogCache,
   delegationCatalogScope,
+  DelegationCatalogScopeChanged,
   subscribeDelegationCatalogInvalidation,
 } from "./renderer-delegation-catalog.js";
 import { createRemoteConnectionsControl } from "./remote-connections-control.js";
@@ -1055,13 +1056,15 @@ export function installRendererBindingProbe(
 
   const composerClient = (mounted: MountedComposer): RendererModelClient | null =>
     mounted.hostId ? modelClientForHost(mounted.hostId) : null;
-  const composerAvailability = (mounted: MountedComposer) => {
+  const composerAvailability = (mounted: MountedComposer): HarnessAvailability => {
     if (!mounted.hostId) return {};
     const state = hostHarnessAvailabilityState(mounted.hostId);
     const agent = controller.get(mounted.composer).agent;
-    return state.plugins && agent !== "codex" && !state.plugins.some(({ id }) => id === agent)
-      ? { ...state.availability, [agent]: "unavailable" as const }
-      : state.availability;
+    if (state.plugins && agent !== "codex" && !state.plugins.some(({ id }) => id === agent))
+      return { ...state.availability, [agent]: "unavailable" };
+    if (hasStartingAntigravityCatalog(mounted, mounted.hostId))
+      return { ...state.availability, antigravity: "ready" };
+    return state.availability;
   };
   const delegationTarget = (
     mounted: MountedComposer,
@@ -1105,6 +1108,30 @@ export function installRendererBindingProbe(
       ...(cwd ? { cwd } : {}),
     };
   };
+
+  function hasStartingAntigravityCatalog(mounted: MountedComposer, hostId: string): boolean {
+    const state = hostHarnessAvailabilityState(hostId);
+    if (
+      hostId !== "local" ||
+      mounted.modelTarget?.[0] !== "default" ||
+      state.availability.antigravity !== "checking"
+    )
+      return false;
+    const plugin = state.plugins?.find(({ id }) => id === "antigravity");
+    const client = modelClientForHost(hostId);
+    if (!plugin || !client) return false;
+    const cwd = draftWorkspaces.get(hostId);
+    const scope = delegationCatalogScope(
+      document,
+      client,
+      hostId,
+      harnessIdSchema.parse(plugin.id),
+      cwd ? { cwd } : undefined,
+      plugin.version,
+      undefined,
+    );
+    return Boolean(delegationCatalogCache(client).restore(scope));
+  }
 
   const renderMounted = (mounted: MountedComposer): void => {
     if (!isMountedComposer(mounted.composer)) return;
@@ -1686,7 +1713,7 @@ export function installRendererBindingProbe(
         : undefined;
     const catalogScope = scopeFor(location);
     const cache = catalogClient && catalogScope ? delegationCatalogCache(catalogClient) : undefined;
-    const cached = catalogScope?.cacheable ? cache?.read(catalogScope.key) : undefined;
+    const cached = catalogScope?.cacheable ? cache?.restore(catalogScope) : undefined;
     const applied = appliedCatalogs.get(mounted);
     if (catalogScope?.changingCredentials) {
       appliedCatalogs.delete(mounted);
@@ -1703,7 +1730,13 @@ export function installRendererBindingProbe(
       hostState.availability[agent] ?? (hostState.plugins ? "unavailable" : "checking");
     // The selected Harness inspection already validates availability. Waiting
     // for its background discovery first would defeat interactive scheduling.
-    if (availability !== "ready" && availability !== "checking") {
+    const availabilityError = hostState.errors[agent];
+    const invalidCatalog =
+      availability === "notInstalled" || availabilityError?.code === "authenticationRequired";
+    const keepSnapshot =
+      catalogScope?.disk && cached && availabilityError?.retryable && !invalidCatalog;
+    if (availability !== "ready" && availability !== "checking" && !keepSnapshot) {
+      if (cache && catalogScope && invalidCatalog) cache.invalidate(catalogScope);
       mounted.modelView = {
         status: composerAdapterState(mounted) === "ready" ? "error" : "waitingForAdapter",
         thinkingSelectionSupported: false,
@@ -1738,7 +1771,9 @@ export function installRendererBindingProbe(
       controller.get(mounted.composer).agent === agent &&
       mounted.hostId === requestHostId &&
       activeModelHostId(mounted.composer) === requestHostId &&
-      scopeFor(currentLocation())?.key === catalogScope?.key;
+      scopeFor(currentLocation())?.key === catalogScope?.key &&
+      hostState.availability[agent] !== "notInstalled" &&
+      hostState.errors[agent]?.code !== "authenticationRequired";
     const refreshInBackground = () => {
       if (!cache || !catalogScope || (!force && cache.isFresh(catalogScope.key))) return;
       void cache
@@ -1751,7 +1786,18 @@ export function installRendererBindingProbe(
           )
             void loadExternalCatalog(mounted);
         })
-        .catch(() => undefined);
+        .catch((error: unknown) => {
+          if (!(error instanceof DelegationCatalogScopeChanged) || !composerScopeIsCurrent())
+            return;
+          appliedCatalogs.delete(mounted);
+          mounted.modelView = {
+            status: "error",
+            thinkingSelectionSupported: false,
+            error: error.message,
+          };
+          mounted.permissionModeView = { status: "idle" };
+          renderMounted(mounted);
+        });
     };
     if (
       cached &&
@@ -2696,6 +2742,12 @@ export function installRendererBindingProbe(
           controller.setEnabledAgents(enabledAgents);
           sidebarAgentIcons.refresh();
           for (const mounted of mountedByComposer.values()) {
+            if (
+              mounted.hostId === hostId &&
+              controller.get(mounted.composer).agent === "antigravity" &&
+              hasStartingAntigravityCatalog(mounted, hostId)
+            )
+              void loadExternalCatalog(mounted);
             if (mounted.hostId === hostId || hostId === "local") renderMounted(mounted);
           }
           publishConnectionStatus();
@@ -2743,8 +2795,17 @@ export function installRendererBindingProbe(
             // Bulk discovery must not occupy the native interactive slots needed
             // to identify the visible Thread and load its selected configuration.
             // Availability only: the selected Harness loads its catalog through full inspection.
+            const cwd =
+              hostId === "local" && agent === "antigravity"
+                ? draftWorkspaces.get(hostId)
+                : undefined;
             const inspection = await client.inspectHarness(
-              { harnessId: harnessIdSchema.parse(agent), refresh, purpose: "availability" },
+              {
+                harnessId: harnessIdSchema.parse(agent),
+                ...(cwd ? { cwd } : {}),
+                refresh,
+                purpose: "availability",
+              },
               { priority: "background" },
             );
             status = inspection.status === "ready" ? "ready" : inspection.status;
@@ -2784,6 +2845,22 @@ export function installRendererBindingProbe(
           state.errors[agent] = nextError;
           state.availability = { ...state.availability, [agent]: status };
           state.webUi = { ...state.webUi, [agent]: webUiAvailable };
+          if (
+            hostId === "local" &&
+            agent === "antigravity" &&
+            (status === "notInstalled" || nextError?.code === "authenticationRequired")
+          ) {
+            const scope = delegationCatalogScope(
+              document,
+              client,
+              hostId,
+              harnessIdSchema.parse(agent),
+              undefined,
+              pluginForHost(hostId, agent)?.version,
+              undefined,
+            );
+            delegationCatalogCache(client).invalidate(scope);
+          }
           for (const mounted of mountedByComposer.values()) {
             if (mounted.hostId !== hostId) continue;
             const composerState = controller.get(mounted.composer);

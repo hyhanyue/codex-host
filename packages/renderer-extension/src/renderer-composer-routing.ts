@@ -562,7 +562,7 @@ export function mountComposerRouting(
         inspection = result;
         renderSelections();
       };
-      const cached = cacheable ? cache.read(key) : undefined;
+      const cached = cacheable ? cache.restore(catalogScope) : undefined;
       if (cached) ready(cached);
       else status(t("Loading…", "加载中…"));
       const preload =
@@ -597,13 +597,15 @@ export function mountComposerRouting(
             inspection = undefined;
             body.hidden = true;
             confirm.disabled = true;
-            void options
-              .codexAccounts?.(current.hostId)
-              ?.refresh()
-              .then(() => syncCatalog());
+            if (harnessId === "codex") {
+              void options
+                .codexAccounts?.(current.hostId)
+                ?.refresh()
+                .then(() => syncCatalog());
+            }
           }
           const detail = scopeChanged
-            ? t("The Agent account context changed.", "Agent 的账号上下文已变化。")
+            ? error.message || t("The Agent account context changed.", "Agent 的账号上下文已变化。")
             : error instanceof Error
               ? error.message
               : String(error);

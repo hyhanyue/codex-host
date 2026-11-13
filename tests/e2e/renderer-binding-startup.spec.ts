@@ -145,7 +145,8 @@ const { outputFiles } = await build({
               : [...new Set(["pi", "deepseek-harness", "opencode", "claude-code", "grok", "omp", "kiro-cli", ...(globalThis.startupAgent ? [globalThis.startupAgent] : [])])]
           ).map(id => ({ id, name: id === "pi" ? "Pi" : id === "grok" ? "Grok" : id, version: "1" })) }),
           inspectHarness: async (_input, options) => {
-            if (globalThis.holdBackgroundInspections && options?.priority === "background") {
+            if (globalThis.holdAntigravityInspections && _input.harnessId === "antigravity" ||
+                globalThis.holdBackgroundInspections && options?.priority === "background") {
               await new Promise(() => {});
             }
             return inspection;
@@ -232,6 +233,30 @@ const { outputFiles } = await build({
 
 const browserBundle = outputFiles[0]?.text;
 if (!browserBundle) throw new Error("Renderer binding startup E2E bundle was not generated");
+
+test("opens the Antigravity model picker after reload while native inspection is pending", async ({
+  page,
+}) => {
+  await page.evaluate(() => Reflect.set(globalThis, "startupAgent", "antigravity"));
+  await page.addScriptTag({ content: browserBundle });
+  const trigger = page.locator("[data-codexhost-model-control] > button[aria-haspopup=menu]");
+  await expect(trigger).toContainText("Startup Model");
+
+  await page.reload();
+  await page.evaluate(() =>
+    Object.assign(globalThis, {
+      startupAgent: "antigravity",
+      holdAntigravityInspections: true,
+    }),
+  );
+  await page.addScriptTag({ content: browserBundle });
+  await expect(trigger).toContainText("Startup Model");
+  await expect(trigger).toBeEnabled();
+  await trigger.click();
+  await expect(
+    page.getByRole("menuitemradio", { name: "Startup Model", exact: true }),
+  ).toBeVisible();
+});
 
 test("Copilot preselects Auto and sends without a manual Model choice", async ({ page }) => {
   test.skip(

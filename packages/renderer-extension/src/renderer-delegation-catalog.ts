@@ -1,3 +1,4 @@
+import { harnessInspectionSchema } from "@codexhost/shared-contracts";
 import type {
   DelegationCatalogParams,
   HarnessId,
@@ -18,6 +19,7 @@ interface CatalogScope {
   targetKey: string;
   cacheable: boolean;
   changingCredentials: boolean;
+  disk?: { window: Window; key: string; needsRefresh: boolean };
   persistent?: Omit<DelegationCatalogParams, "action" | "threadId" | "cwd"> & Location;
 }
 
@@ -26,6 +28,20 @@ export class DelegationCatalogScopeChanged extends Error {}
 const maxAgeMs = 60 * 60_000;
 const retryDelayMs = 30_000;
 const maxEntries = 32;
+const storagePrefix = "codexhost.model-catalog.v1:antigravity:";
+const maxSnapshotLength = 256 * 1024;
+
+function clearSavedCatalogs(window: Window): void {
+  try {
+    const storage = window.localStorage;
+    for (let index = storage.length - 1; index >= 0; index--) {
+      const key = storage.key(index);
+      if (key?.startsWith(storagePrefix)) storage.removeItem(key);
+    }
+  } catch {
+    // Storage can be unavailable in a restricted Desktop renderer.
+  }
+}
 const credentialsChanged = "codexhost:delegation-credentials-changed";
 const credentialEpochs = new WeakMap<
   RendererModelClient["inspectHarness"],
@@ -61,12 +77,13 @@ export function beginDelegationCatalogCredentialChange(
     state.pending += pendingDelta;
     if (typeof window !== "undefined") window.dispatchEvent(new Event(credentialsChanged));
   };
+  if (harnessId === "antigravity" && typeof window !== "undefined") clearSavedCatalogs(window);
   invalidate(1);
   return () => invalidate(-1);
 }
 
 export function delegationCatalogScope(
-  _document: Document,
+  document: Document,
   client: RendererModelClient,
   hostId: string,
   harnessId: HarnessId,
@@ -111,12 +128,27 @@ export function delegationCatalogScope(
           ...location,
         }
       : undefined;
+  const owner = document.defaultView;
+  // A remote Host ID or a Thread ID is not a durable workspace identity here.
+  const disk =
+    hostId === "local" &&
+    harnessId === "antigravity" &&
+    pluginVersion &&
+    owner &&
+    (!location || "cwd" in location)
+      ? {
+          window: owner,
+          key: storagePrefix + JSON.stringify([pluginVersion, location?.cwd ?? null]),
+          needsRefresh: credentials !== undefined,
+        }
+      : undefined;
   return {
     key: JSON.stringify([...target, pluginVersion, accountScope]),
     targetKey: JSON.stringify(target),
     cacheable: !changingCredentials && (harnessId !== "codex" || ownAccounts?.phase === "ready"),
     changingCredentials,
     ...(persistent ? { persistent } : {}),
+    ...(disk ? { disk } : {}),
   };
 }
 
@@ -133,17 +165,73 @@ interface Entry {
   refreshed: boolean;
   expiresAt: number;
   retryAt?: number;
+  localAntigravity?: boolean;
 }
 
 class DelegationCatalogCache {
   readonly #entries = new Map<string, Entry>();
   readonly #flights = new Map<string, { key: string; result: Promise<Catalog> }>();
+  readonly #diskReads = new Set<string>();
+  #diskGeneration = 0;
   readonly #preloads = new Map<string, Promise<Catalog | undefined>>();
 
   constructor(private readonly client: RendererModelClient) {}
 
   read(key: string): Catalog | undefined {
     return this.#entry(key)?.catalog;
+  }
+
+  restore(scope: CatalogScope): Catalog | undefined {
+    const { key, disk, cacheable } = scope;
+    const current = this.read(key);
+    if (current || !disk || !cacheable || this.#diskReads.has(key)) return current;
+    this.#diskReads.add(key);
+    if (this.#diskReads.size > maxEntries) {
+      const oldest = this.#diskReads.values().next();
+      if (!oldest.done) this.#diskReads.delete(oldest.value);
+    }
+    try {
+      const raw = disk.window.localStorage.getItem(disk.key);
+      if (!raw || raw.length > maxSnapshotLength) return undefined;
+      const result = harnessInspectionSchema.safeParse(JSON.parse(raw));
+      if (!result.success || result.data.status !== "ready") return undefined;
+      this.#remember(key, {
+        catalog: result.data,
+        refreshed: false,
+        expiresAt: 0,
+        localAntigravity: true,
+      });
+      return result.data;
+    } catch {
+      return undefined;
+    }
+  }
+
+  invalidate(scope: CatalogScope): void {
+    this.#entries.delete(scope.key);
+    if (scope.disk) {
+      this.#diskGeneration++;
+      for (const [key, entry] of this.#entries) {
+        if (entry.localAntigravity) this.#entries.delete(key);
+      }
+      clearSavedCatalogs(scope.disk.window);
+    }
+  }
+
+  #save(disk: NonNullable<CatalogScope["disk"]>, catalog: Catalog): void {
+    try {
+      const storage = disk.window.localStorage;
+      const raw = JSON.stringify(catalog);
+      if (raw.length > maxSnapshotLength) return;
+      storage.setItem(disk.key, raw);
+      const keys = Array.from({ length: storage.length }, (_, index) => storage.key(index)).filter(
+        (key): key is string => key !== disk.key && key?.startsWith(storagePrefix) === true,
+      );
+      for (const key of keys.slice(0, Math.max(0, keys.length + 1 - maxEntries)))
+        storage.removeItem(key);
+    } catch {
+      // A cache write must not affect a usable native catalog.
+    }
   }
 
   isFresh(key: string): boolean {
@@ -206,12 +294,15 @@ class DelegationCatalogCache {
   }
 
   refresh(
-    { key, targetKey, cacheable, persistent }: CatalogScope,
+    scope: CatalogScope,
     input: HarnessInspectParams,
     stillInScope: () => boolean,
     options?: RendererRequestOptions,
   ): Promise<Catalog> {
+    const { key, targetKey, cacheable, persistent, disk } = scope;
     const cached = this.#entry(key);
+    const diskGeneration = this.#diskGeneration;
+    const isDiskCurrent = () => !disk || diskGeneration === this.#diskGeneration;
     if (input.refresh !== true && cached?.catalog && this.isFresh(key))
       return Promise.resolve(cached.catalog);
     const active = this.#flights.get(targetKey);
@@ -235,24 +326,48 @@ class DelegationCatalogCache {
             if (!(error instanceof RendererMethodUnavailableError)) throw error;
           }
         }
-        const params = { ...input, refresh: true };
+        // A fresh Renderer can reuse a same-workspace inspection already warmed by the Host.
+        const params = {
+          ...input,
+          refresh: input.refresh === true || Boolean(cached?.catalog) || !disk || disk.needsRefresh,
+        };
         return options
           ? this.client.inspectHarness(params, options)
           : this.client.inspectHarness(params);
       })
       .then((inspection) => {
-        if (inspection.status !== "ready") throw new Error(inspection.error.message);
+        if (!isDiskCurrent()) throw new DelegationCatalogScopeChanged("Agent credentials changed");
+        if (inspection.status !== "ready") {
+          if (
+            disk &&
+            isLatest() &&
+            stillInScope() &&
+            (inspection.status === "notInstalled" ||
+              inspection.error.code === "authenticationRequired")
+          ) {
+            this.invalidate(scope);
+            throw new DelegationCatalogScopeChanged(inspection.error.message);
+          }
+          throw new Error(inspection.error.message);
+        }
         if (cacheable && isLatest() && stillInScope()) {
+          if (disk) this.#save(disk, inspection);
           this.#remember(key, {
             catalog: inspection,
             refreshed: true,
+            ...(disk ? { localAntigravity: true } : {}),
             expiresAt: Date.now() + maxAgeMs,
           });
         }
         return inspection;
       })
       .catch((error: unknown) => {
-        if (error instanceof DelegationCatalogScopeChanged && isLatest() && stillInScope())
+        if (
+          error instanceof DelegationCatalogScopeChanged &&
+          isLatest() &&
+          stillInScope() &&
+          isDiskCurrent()
+        )
           this.#entries.delete(key);
         else if (cached?.catalog && isLatest() && stillInScope())
           cached.retryAt = Date.now() + retryDelayMs;

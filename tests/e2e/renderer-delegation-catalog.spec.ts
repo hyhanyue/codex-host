@@ -17,6 +17,7 @@ const { outputFiles } = await build({
       const targets = [
         { agent: "codex", label: "Codex" },
         { agent: "pi", label: "Pi" },
+        { agent: "antigravity", label: "Antigravity", plugin: { version: "1" } },
         { agent: "claude-code", label: "Claude Code" },
       ];
       const requests = [];
@@ -76,6 +77,12 @@ const { outputFiles } = await build({
         complete(index, models) { requests[index].resolve(ready(models)); },
         seed(email, models) { snapshots.set(JSON.stringify(["primary", "local", email, "/work"]), ready(models)); },
         reject(index) { requests[index].reject(new Error("Agent temporarily unavailable")); },
+        requireLogin(index) {
+          requests[index].resolve({
+            status: "error",
+            error: { code: "authenticationRequired", message: "Sign in again", retryable: false },
+          });
+        },
         context(location, hostId = "local", connection = "primary") {
           context = { client: clients[connection], hostId, ...location };
           routing.sync();
@@ -116,6 +123,7 @@ interface CatalogFixture {
   calls(): { connection: string; params: object }[];
   complete(index: number, models: Models): void;
   reject(index: number): void;
+  requireLogin(index: number): void;
   context(location: Location, hostId?: string, connection?: string): void;
   seed(email: string, models: Models): void;
   account(email?: string, revision?: number): void;
@@ -338,4 +346,40 @@ test("retains the last successful snapshot after failure and retries", async ({ 
   await complete(page, 1, [["recovered", ["low"]]]);
   await expect(model(page).locator("option", { hasText: "recovered" })).toHaveCount(1);
   await expect(model(page).locator("option:checked")).toHaveText("Choose again");
+});
+
+test("restores the local Antigravity directory on the first open after reload", async ({
+  page,
+}) => {
+  await page.route("https://catalog.test/", (route) =>
+    route.fulfill({
+      contentType: "text/html",
+      body: '<div contenteditable="true" role="textbox"></div>',
+    }),
+  );
+  await page.goto("https://catalog.test/");
+  await page.addScriptTag({ content: bundle });
+  await page.evaluate(() => catalogFixture.open("antigravity"));
+  await expect.poll(() => page.evaluate(() => catalogFixture.calls())).toHaveLength(1);
+  await complete(page, 0, [["saved-model", ["low"]]]);
+  await expect(model(page).locator("option", { hasText: "saved-model" })).toHaveCount(1);
+
+  await page.reload();
+  await page.addScriptTag({ content: bundle });
+  const immediate = await page.evaluate(() => {
+    catalogFixture.open("antigravity");
+    return document.querySelector('option[value="saved-model"]') !== null;
+  });
+  expect(immediate).toBe(true);
+  await expect(apply(page)).toBeEnabled();
+  await expect.poll(() => page.evaluate(() => catalogFixture.calls())).toHaveLength(1);
+  await page.evaluate(() => catalogFixture.requireLogin(0));
+  await expect(apply(page)).toBeDisabled();
+  await expect(page.getByRole("status")).toContainText("Sign in again");
+
+  await page.reload();
+  await page.addScriptTag({ content: bundle });
+  await page.evaluate(() => catalogFixture.open("antigravity"));
+  await expect(model(page).locator("option", { hasText: "saved-model" })).toHaveCount(0);
+  await expect(apply(page)).toBeDisabled();
 });
