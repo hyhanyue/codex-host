@@ -4,6 +4,7 @@ import { z } from "zod";
 export const WEB_FOLLOW_PROJECTION_KEYS: ReadonlySet<string> = new Set([
   "codexhostTurnChanges",
   "codexhostToolOutput",
+  "codexhostUsage",
 ]);
 
 /** One cumulative changed file; full before/after text is fetched only on expansion. */
