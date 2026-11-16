@@ -89,20 +89,25 @@ export class SharedThreadBridge {
           return null;
         }
         this.#peer = peer;
+        const previouslyKnown = [...this.#known];
         peer.subscribe((message) => {
           const params = object(message.params) ? message.params : {};
-          if (
-            object(params.thread) &&
-            params.thread.modelProvider === "codexhost" &&
-            typeof params.thread.id === "string"
-          ) {
-            this.#known.add(params.thread.id);
+          if (object(params.thread) && typeof params.thread.id === "string") {
+            if (params.thread.modelProvider === "codexhost") this.#known.add(params.thread.id);
+            else if (message.method === "thread/started" && this.options.delegateCreates)
+              this.#known.delete(params.thread.id);
           }
           this.#publish(message);
         });
         void peer.closed.then(() => {
           if (this.#peer === peer) this.#peer = null;
         });
+        // A handoff may have finished while this Desktop was disconnected.
+        if (this.options.delegateCreates) {
+          for (let offset = 0; offset < previouslyKnown.length; offset += 100) {
+            await this.ownership(previouslyKnown.slice(offset, offset + 100));
+          }
+        }
         // Announce existing Threads when a GUI starts or the SSH service is discovered later.
         for (const thread of await this.#rows(peer, {})) {
           this.#publish({ method: "thread/started", params: { thread }, emittedAtMs: Date.now() });
@@ -138,6 +143,8 @@ export class SharedThreadBridge {
       if (thread.owner === "external") {
         owners.set(thread.threadId, thread.harnessId);
         this.#known.add(thread.threadId);
+      } else if (this.options.delegateCreates) {
+        this.#known.delete(thread.threadId);
       }
     }
     return owners;

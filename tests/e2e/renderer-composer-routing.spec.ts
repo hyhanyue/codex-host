@@ -90,7 +90,7 @@ const { outputFiles } = await build({
             case "codexhost/harness/inspect": return inspection;
             case "codexhost/thread/inspect":
               return owner === "codex" ? { owner, locked: true } : {
-                owner: "external", locked: true, harnessId: "pi",
+                owner: "external", locked: true, harnessId: "pi", canReturnToCodex: true,
                 transportModelId: "codexhost/pi-native",
                 effectiveModel: { id: "alpha" }, effectiveThinkingOptionId: "low",
                 history: inspection.capabilities.history,
@@ -99,7 +99,7 @@ const { outputFiles } = await build({
               return { summary: "Codex found a missing check in this workspace.", revision: "a".repeat(64) };
             case HANDOFF_SEND_METHOD:
               if (failSend) { failSend = false; throw new Error("Target refused"); }
-              owner = "pi";
+              owner = params.harnessId;
               return { turnId: "handoff-turn" };
             case COMPOSER_DELEGATE_METHOD:
               if (failSend && params.threadId) { failSend = false; throw new Error("Model is unavailable"); }
@@ -148,6 +148,41 @@ async function loadComposer(page: Page, draft = false) {
   }
   await page.addScriptTag({ content: bundle });
 }
+
+test("offers Codex again after handing off an existing conversation", async ({ page }) => {
+  await loadComposer(page);
+  const editor = page.getByRole("textbox");
+  const picker = page.getByRole("group", { name: "Switch conversation Agent" });
+  const accept = () => picker.getByRole("button", { name: "Use for next turn" }).click();
+  const send = () => page.getByRole("button", { name: "Send", exact: true }).click();
+
+  await page.getByRole("button", { name: "Switch Agent, current Codex" }).click();
+  await expect(picker.getByRole("button", { name: "Codex", exact: true })).toBeDisabled();
+  await picker.getByRole("button", { name: "Pi", exact: true }).click();
+  await accept();
+  await send();
+  await expect(page.getByText("Target refused")).toBeVisible();
+  await send();
+
+  await page.getByRole("button", { name: "Switch Agent, current Pi" }).click();
+  await expect(picker.getByRole("button", { name: "Pi", exact: true })).toBeDisabled();
+  await picker.getByRole("button", { name: "Codex", exact: true }).click();
+  await accept();
+  await editor.fill("Continue in Codex");
+  await send();
+  await expect(page.getByRole("button", { name: "Switch Agent, current Codex" })).toBeVisible();
+  const requests = await page.evaluate(() => Reflect.get(window, "requests"));
+  expect(requests).toContainEqual(
+    expect.objectContaining({
+      method: "codexhost/thread/handoff/send",
+      params: expect.objectContaining({
+        threadId: "parent-thread",
+        harnessId: "codex",
+        text: "Continue in Codex",
+      }),
+    }),
+  );
+});
 
 test("previews, cancels, and retries a handoff without losing the native draft", async ({
   page,

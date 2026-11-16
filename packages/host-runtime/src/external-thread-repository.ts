@@ -140,8 +140,18 @@ export class ExternalThreadRepository {
   }
 
   async find(threadId: string): Promise<StoredThreadRecordV1 | null> {
+    const record = await this.#findRecord(threadId);
+    return record?.harnessId === "codex" ? null : record;
+  }
+
+  async findHandoff(threadId: string): Promise<StoredThreadRecordV1 | null> {
+    const record = await this.#findRecord(threadId);
+    return record?.handoff ? record : null;
+  }
+
+  #findRecord(threadId: string): Promise<StoredThreadRecordV1 | null> {
     const parsed = hostThreadIdSchema.safeParse(threadId);
-    return parsed.success ? this.store.getThread(parsed.data) : null;
+    return parsed.success ? this.store.getThread(parsed.data) : Promise.resolve(null);
   }
 
   commitThreadHandoff(input: CommitThreadHandoffInput): Promise<StoredThreadRecordV1> {
@@ -150,8 +160,8 @@ export class ExternalThreadRepository {
     return this.store.commitThreadHandoff(input);
   }
 
-  list(): Promise<StoredThreadRecordV1[]> {
-    return this.store.listThreads();
+  async list(): Promise<StoredThreadRecordV1[]> {
+    return (await this.store.listThreads()).filter(({ harnessId }) => harnessId !== "codex");
   }
 
   listSectionPlacements(): Promise<StoredSectionPlacementV1[]> {

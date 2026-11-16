@@ -136,6 +136,10 @@ export function rendererAgentPickerTooltip(
   return `Agent: ${rendererAgentLabel(state.agent, plugin)}${account}${state.phase === "locked" ? " (locked)" : ""}`;
 }
 
+export interface RendererHandoffAvailability {
+  canReturnToCodex: boolean;
+}
+
 export function rendererAgentPickerView(
   state: { agent: RendererAgent; phase: ComposerAgentPhase },
   adapterState: RendererAdapterStatus["state"],
@@ -143,14 +147,16 @@ export function rendererAgentPickerView(
   agents: readonly RendererAgent[],
   availability: AgentAvailability = {},
   plugin?: HarnessPluginDescriptor,
-  handoffEnabled = false,
+  handoff?: RendererHandoffAvailability,
 ): RendererAgentPickerView {
   const optionDisabled = Object.fromEntries(
     agents.map((agent) => [
       agent,
       switching ||
         (state.phase === "locked" &&
-          (!handoffEnabled || agent === "codex" || agent === state.agent)) ||
+          (!handoff ||
+            agent === state.agent ||
+            (agent === "codex" && !handoff.canReturnToCodex))) ||
         (agent !== "codex" && (adapterState !== "ready" || availability[agent] !== "ready")),
     ]),
   ) as Partial<Record<RendererAgent, boolean>>;
@@ -168,8 +174,7 @@ export function rendererAgentPickerView(
     label: rendererAgentLabel(state.agent, plugin),
     triggerDisabled:
       switching ||
-      (state.phase === "locked" &&
-        (!handoffEnabled || agents.every((agent) => optionDisabled[agent]))) ||
+      (state.phase === "locked" && (!handoff || agents.every((agent) => optionDisabled[agent]))) ||
       (agents.length < 2 && state.agent === "codex"),
     nativeModelHidden: switching || state.agent !== "codex",
     optionDisabled,
@@ -708,7 +713,7 @@ export function renderRendererAgentPicker(
   availability: AgentAvailability = {},
   currentCodexAccount: CodexAccountSummary | null = null,
   ownershipError = false,
-  handoffEnabled = false,
+  handoff?: RendererHandoffAvailability,
 ): RendererAgentPickerView {
   const view = rendererAgentPickerView(
     state,
@@ -717,7 +722,7 @@ export function renderRendererAgentPicker(
     control.agents,
     availability,
     control.plugins.find(({ id }) => id === state.agent),
-    handoffEnabled,
+    handoff,
   );
   control.updateAvailability(availability);
   if (control.iconSlot.dataset.agent !== state.agent) {
@@ -738,7 +743,7 @@ export function renderRendererAgentPicker(
     ownershipError
       ? pickerGroupMessages().ownershipErrorLabel
       : state.phase === "locked"
-        ? handoffEnabled
+        ? handoff
           ? `Switch Agent, current ${view.label}`
           : `Agent: ${view.label}`
         : `Select Agent, current ${view.label}`,
@@ -746,11 +751,11 @@ export function renderRendererAgentPicker(
   control.trigger.title = ownershipError
     ? pickerGroupMessages().ownershipErrorLabel
     : rendererAgentPickerTooltip(
-        handoffEnabled ? { ...state, phase: "draft" } : state,
+        handoff ? { ...state, phase: "draft" } : state,
         currentCodexAccount ?? undefined,
         control.plugins.find(({ id }) => id === state.agent),
       );
-  const showHandoff = state.phase === "locked" && handoffEnabled && !control.trigger.disabled;
+  const showHandoff = state.phase === "locked" && handoff && !control.trigger.disabled;
   if (control.handoffLabel.hidden === showHandoff) control.handoffLabel.hidden = !showHandoff;
   const handoffLabel = `${view.label} ⌄`;
   if (control.handoffLabel.textContent !== handoffLabel)

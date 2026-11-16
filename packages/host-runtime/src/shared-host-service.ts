@@ -185,6 +185,7 @@ export async function runSharedHostService(
           stockCodex: values["stock-codex"] ?? "",
           official,
           owner,
+          ...(remote === null ? { returnToCodex: host.returnToCodex.bind(host) } : {}),
           store,
           prices,
           ...(updateCoordinator ? { updateCoordinator } : {}),

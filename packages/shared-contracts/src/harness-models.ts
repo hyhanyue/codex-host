@@ -360,6 +360,7 @@ const externalThreadInspectionSchema = z
     effectivePermissionModeId: harnessPermissionModeIdSchema.optional(),
     history: harnessHistoryCapabilitiesSchema,
     usage: threadUsageSnapshotSchema.optional(),
+    canReturnToCodex: z.literal(true).optional(),
     locked: z.literal(true),
   })
   .strict();

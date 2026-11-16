@@ -23,6 +23,7 @@ export function sharedHostDesktop(
     stockCodex: string;
     official: PreparedLocalCodex;
     owner: SharedThreadOwner;
+    returnToCodex?: AppServerHost["returnToCodex"];
     store: ExternalThreadStore;
     prices: ModelPriceCatalog;
     updateCoordinator?: HostUpdateCoordinator;
@@ -64,6 +65,7 @@ export function sharedHostDesktop(
     officialRuntimeScope: options.official.officialRuntimeScope,
     accountControl: options.official.accountControl,
     mappingStore: options.store,
+    ...(options.returnToCodex ? { returnToCodex: options.returnToCodex } : {}),
     closeMappingStoreOnExit: false,
     modelPrices: options.prices,
     sharedThreads: new SharedThreadBridge({

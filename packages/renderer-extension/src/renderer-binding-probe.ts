@@ -607,6 +607,7 @@ interface MountedComposer {
   modelView: ExternalModelControlView;
   permissionModeView: ExternalPermissionModeControlView;
   ownershipStatus: ComposerOwnershipStatus;
+  canReturnToCodex?: boolean;
   threadConfiguration: HarnessModelSelectionState | undefined;
   usage: ThreadUsageSnapshot | null;
   accountCredits: AccountCreditsSnapshot | null;
@@ -1096,7 +1097,9 @@ export function installRendererBindingProbe(
     if (!hostId || !client) return null;
     const threadId = threadIdFromComposerModelTarget(mounted.modelTarget);
     if (threadId) {
-      return mounted.ownershipStatus === "ready" ? { client, hostId, threadId } : null;
+      return mounted.ownershipStatus === "ready"
+        ? { client, hostId, threadId, canReturnToCodex: mounted.canReturnToCodex === true }
+        : null;
     }
     if (controller.get(mounted.composer).phase !== "draft") return null;
     const draftId = mounted.modelTarget?.[1];
@@ -1173,7 +1176,7 @@ export function installRendererBindingProbe(
       settingsLifecycle.locale,
       currentCodexAccount ?? null,
       mounted.ownershipStatus === "error",
-      handoffEnabled,
+      handoffEnabled ? { canReturnToCodex: mounted.canReturnToCodex === true } : undefined,
       client &&
         hostId &&
         (!mounted.accountCredits ||
@@ -1572,6 +1575,8 @@ export function installRendererBindingProbe(
         throw new Error("Thread owner could not be applied to the Composer");
       }
       mounted.ownershipStatus = "ready";
+      mounted.canReturnToCodex =
+        inspection.owner === "external" && inspection.canReturnToCodex === true;
       if (agent !== "codex") {
         if (inspection.owner !== "external") {
           throw new Error("External Thread inspection did not include configuration");

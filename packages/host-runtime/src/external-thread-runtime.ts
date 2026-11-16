@@ -342,6 +342,10 @@ export class ExternalThreadRuntime {
     return true;
   }
 
+  async releaseForHandoff(thread: ExternalThread): Promise<void> {
+    await this.#withLifecycle(thread.id, () => this.#dropIdleSession(thread));
+  }
+
   async #dropIdleSession(thread: ExternalThread): Promise<void> {
     if (this.#threads.get(thread.id) !== thread) return;
     thread.sessionUnavailable = true;

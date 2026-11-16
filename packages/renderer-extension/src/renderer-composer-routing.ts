@@ -24,7 +24,7 @@ import { readNativeTextDraft } from "./renderer-native-composer-controller.js";
 type RoutingContext = {
   client: RendererModelClient;
   hostId: string;
-} & ({ threadId: HostThreadId } | { draftId: string; cwd?: string });
+} & ({ threadId: HostThreadId; canReturnToCodex?: boolean } | { draftId: string; cwd?: string });
 
 function routingScope(context: RoutingContext | null): string | undefined {
   if (!context) return undefined;
@@ -256,10 +256,13 @@ export function mountComposerRouting(
       kind === "handoff" && !available.some(({ agent }) => agent === current.agent)
         ? [current, ...available]
         : available;
+    const context = options.context();
+    const canReturnToCodex = context && "threadId" in context && context.canReturnToCodex;
     for (const target of targets) {
       const active = target.agent === selected?.agent;
       const disabled =
-        kind === "handoff" && (target.agent === "codex" || target.agent === current.agent);
+        kind === "handoff" &&
+        (target.agent === current.agent || (target.agent === "codex" && !canReturnToCodex));
       const card = button("", () => choose(target), disabled);
       card.className =
         "flex min-w-0 items-center gap-2 rounded-lg border border-default px-2 py-1.5 text-start " +

@@ -7,11 +7,14 @@ import type {
 } from "@codexhost/harness-adapter";
 import type { StoredThreadRecordV1 } from "@codexhost/mapping-store";
 import type { JsonObject, JsonValue } from "@codexhost/protocol-core";
+import { listExternalItems, listExternalTurns } from "./external-thread-history.js";
 import {
   hostTurnIdSchema,
   type HostTurnId,
   type NativeSessionRef,
 } from "@codexhost/shared-contracts";
+
+export type NativeHandoffRequest = (method: string, params: JsonObject) => Promise<JsonObject>;
 
 export interface HandoffSource {
   thread: JsonObject;
@@ -26,7 +29,7 @@ function asHandoffObject(value: JsonValue | undefined): value is JsonObject {
 /** Read the complete previous timeline from the original Codex app-server. */
 export async function readOfficialHandoffHistory(
   threadId: string,
-  request: (method: string, params: JsonObject) => Promise<JsonObject>,
+  request: NativeHandoffRequest,
 ): Promise<HandoffSource> {
   const metadata = await request("thread/read", { threadId, includeTurns: false });
   const thread = asHandoffObject(metadata.result) ? metadata.result.thread : undefined;
@@ -52,8 +55,18 @@ export async function readOfficialHandoffHistory(
   if (asHandoffObject(queued.error) && queued.error.code !== -32601)
     throw new Error("Codex Thread queue could not be checked");
 
+  const turns = await readNativeHandoffTurns(threadId, thread.historyMode, request);
+  if (turns.length === 0) throw new Error("Send a first message before switching Agent");
+  return { thread, harnessId: "codex", turns };
+}
+
+export async function readNativeHandoffTurns(
+  threadId: string,
+  historyMode: JsonValue | undefined,
+  request: NativeHandoffRequest,
+): Promise<JsonObject[]> {
   const turns: JsonObject[] = [];
-  if (thread.historyMode === "paginated") {
+  if (historyMode === "paginated") {
     const seen = new Set<string>();
     let cursor: string | null = null;
     do {
@@ -88,8 +101,123 @@ export async function readOfficialHandoffHistory(
       throw new Error("Codex Thread history could not be read");
     turns.push(...history.turns);
   }
-  if (turns.length === 0) throw new Error("Send a first message before switching Agent");
-  return { thread, harnessId: "codex", turns };
+  return turns;
+}
+
+export function nativeHandoffHistory(
+  record: StoredThreadRecordV1,
+  turns: JsonObject[],
+): JsonObject[] {
+  const previousIds = new Set(record.handoff?.previousTurns.map(({ id }) => id));
+  return handoffHistory(
+    record,
+    turns.filter(({ id }) => !previousIds.has(id)),
+  );
+}
+
+export function isNativeHandoffHistoryRequest(method: string, params: JsonObject): boolean {
+  return (
+    method === "thread/resume" ||
+    (method === "thread/read" && params.includeTurns === true) ||
+    method === "thread/turns/list" ||
+    method === "thread/items/list" ||
+    method === "thread/items/read"
+  );
+}
+
+export async function projectNativeHandoffHistory(
+  record: StoredThreadRecordV1,
+  method: string,
+  params: JsonObject,
+  request: NativeHandoffRequest,
+): Promise<JsonObject> {
+  if (method === "thread/resume" || method === "thread/read") {
+    const resume = method === "thread/resume";
+    const response = await request(
+      method,
+      resume
+        ? { ...params, excludeTurns: true, initialTurnsPage: null }
+        : { ...params, includeTurns: false },
+    );
+    if (!asHandoffObject(response.result) || !asHandoffObject(response.result.thread))
+      return response;
+    const result = response.result;
+    const thread = result.thread as JsonObject;
+    const turns = await projectedNativeTurns(record, request);
+    const includeTurns = resume ? params.excludeTurns !== true : true;
+    if (!resume) return { result: { ...result, thread: { ...thread, turns } } };
+    const paginated = record.historyMode === "paginated";
+    return {
+      result: {
+        ...result,
+        thread: { ...thread, turns: includeTurns ? turns : [] },
+        initialTurnsPage: asHandoffObject(params.initialTurnsPage)
+          ? listExternalTurns(turns, params.initialTurnsPage)
+          : null,
+        turnsBackwardsCursor: paginated
+          ? listExternalTurns(turns, { limit: 1, itemsView: "notLoaded" }).backwardsCursor
+          : null,
+        itemsBackwardsCursor: paginated
+          ? listExternalItems(turns, { limit: 1, sortDirection: "desc" }).backwardsCursor
+          : null,
+      },
+    };
+  }
+  if (method === "thread/items/read" && typeof params.turnId === "string") {
+    const turn = record.handoff?.previousTurns.find(({ id }) => id === params.turnId);
+    if (!turn || !Array.isArray(params.itemIds)) return request(method, params);
+    const ids = new Set(params.itemIds);
+    const data = Array.isArray(turn.items)
+      ? turn.items.flatMap((item) =>
+          asHandoffObject(item) && ids.has(item.id ?? null)
+            ? [{ turnId: turn.id ?? null, item }]
+            : [],
+        )
+      : [];
+    return { result: { data } };
+  }
+  const turns = await projectedNativeTurns(record, request);
+  return {
+    result:
+      method === "thread/turns/list"
+        ? listExternalTurns(turns, params)
+        : listExternalItems(turns, params),
+  };
+}
+
+async function projectedNativeTurns(
+  record: StoredThreadRecordV1,
+  request: NativeHandoffRequest,
+): Promise<JsonObject[]> {
+  const turns = await readNativeHandoffTurns(record.hostThreadId, record.historyMode, request);
+  return nativeHandoffHistory(record, turns);
+}
+
+export async function startNativeHandoff(
+  request: NativeHandoffRequest,
+  threadId: string,
+  text: string,
+  summary: string,
+  requestId: string,
+): Promise<HostTurnId> {
+  const response = await request("turn/start", {
+    threadId,
+    clientUserMessageId: requestId,
+    input: [{ type: "text", text }],
+    additionalContext: {
+      codexhostHandoff: { kind: "untrusted", name: "Previous Agent transcript", value: summary },
+    },
+  });
+  if (asHandoffObject(response.error)) {
+    throw new Error(
+      typeof response.error.message === "string"
+        ? response.error.message
+        : "Codex declined the handoff",
+    );
+  }
+  const turn = asHandoffObject(response.result) ? response.result.turn : undefined;
+  if (!asHandoffObject(turn)) throw new Error("Codex did not return a Turn identity");
+  return hostTurnIdSchema.parse(turn.id);
 }
 
 export function handoffDigest(value: unknown): string {

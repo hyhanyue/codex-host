@@ -15,6 +15,7 @@ import {
   CONTROL_ATTRIBUTE,
   mountRendererAgentPicker,
   renderRendererAgentPicker,
+  type RendererHandoffAvailability,
   type RendererAgentPickerControl,
 } from "./renderer-agent-picker.js";
 import {
@@ -817,7 +818,7 @@ export function renderComposerAgentControl(
   locale: RendererSettingsLocale = "en",
   currentCodexAccount: CodexAccountSummary | null = null,
   ownershipError = false,
-  handoffEnabled = false,
+  handoff?: RendererHandoffAvailability,
   quotaSources?: ComposerQuotaSources,
 ): boolean {
   if (control.usage === null) {
@@ -867,7 +868,7 @@ export function renderComposerAgentControl(
     availability,
     currentCodexAccount,
     ownershipError,
-    handoffEnabled,
+    handoff,
   );
   reconcileComposerNativeControls(
     control,

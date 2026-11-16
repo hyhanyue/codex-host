@@ -17,9 +17,14 @@ import {
   handoffDigest,
   handoffHistory,
   handoffMarker,
+  nativeHandoffHistory,
+  isNativeHandoffHistoryRequest,
   previewHandoff,
+  projectNativeHandoffHistory,
   readOfficialHandoffHistory,
+  startNativeHandoff,
   type HandoffSource,
+  type NativeHandoffRequest,
 } from "./thread-handoff.js";
 import {
   THREAD_QUESTION_RESPOND_METHOD,
@@ -382,6 +387,7 @@ export interface AppServerHostOptions {
   externalOnly?: boolean;
   /** Local shared owner may transfer native Threads into its durable external Sessions. */
   localNativeHandoff?: boolean;
+  returnToCodex?: AppServerHost["returnToCodex"];
   /** Shared service's live Desktop connection count, not native client subscriptions. */
   desktopConnected?(): boolean;
   /** GUI connection to the single external-session owner. */
@@ -692,6 +698,7 @@ export class AppServerHost {
   readonly #replyGuards = new Map<unknown, Set<{ answered: boolean }>>();
   #pendingOfficialTurnStarts = new Map<unknown, string>();
   #handoffsInFlight = new Set<string>();
+  #bufferedNativeHandoffs = new Map<string, Array<() => Promise<void>>>();
   readonly #composerDraftStarts = new Map<
     string,
     { digest: string; result: Promise<string>; expiresAt: number }
@@ -1674,6 +1681,17 @@ export class AppServerHost {
       );
       return;
     }
+    const params = requestObject(request);
+    if (
+      request.method === HANDOFF_SEND_METHOD &&
+      params.harnessId === "codex" &&
+      typeof params.threadId === "string" &&
+      !this.#options.externalOnly &&
+      (!this.#options.sharedThreads?.options.delegateCreates || this.#options.returnToCodex)
+    ) {
+      await this.#returnDesktopThreadToCodex(request, params.threadId);
+      return;
+    }
     if (
       this.#options.sharedThreads &&
       (request.method.startsWith("thread/") ||
@@ -1836,6 +1854,14 @@ export class AppServerHost {
             params: { ...(isRecord(original.params) ? original.params : {}), ...options },
           });
       }
+      const handoffHistory = await this.#nativeHandoffResponse(
+        request.method,
+        requestObject(request),
+      );
+      if (handoffHistory) {
+        await this.#writer.json({ ...handoffHistory, id: request.id });
+        return;
+      }
       await this.#officialRuntime.sendFrame(frame);
       this.#markDesktopRequestAnswered(request.id);
     } catch {
@@ -1849,13 +1875,16 @@ export class AppServerHost {
     }
   }
 
-  async #handleOfficialOutput(input: {
-    accountId: string;
-    frame: Buffer<ArrayBufferLike>;
-    value: JsonValue;
-  }): Promise<void> {
-    for (const listener of this.#nativeSettingsNotifications) listener(input.value);
+  async #handleOfficialOutput(
+    input: {
+      accountId: string;
+      frame: Buffer<ArrayBufferLike>;
+      value: JsonValue;
+    },
+    bypassHandoffBuffer = false,
+  ): Promise<void> {
     if (this.#options.externalOnly) {
+      for (const listener of this.#nativeSettingsNotifications) listener(input.value);
       this.#client.observeNativeMessage(input.value);
       // Native children created through Delegation still have a native owner
       // and lifecycle. Their rendering stays on the GUI's native connection.
@@ -1863,6 +1892,19 @@ export class AppServerHost {
       return;
     }
     const parsed = input.value;
+    if (
+      !bypassHandoffBuffer &&
+      isRecord(parsed) &&
+      isRecord(parsed.params) &&
+      typeof parsed.params.threadId === "string"
+    ) {
+      const pending = this.#bufferedNativeHandoffs.get(parsed.params.threadId);
+      if (pending) {
+        pending.push(() => this.#handleOfficialOutput(input, true));
+        return;
+      }
+    }
+    for (const listener of this.#nativeSettingsNotifications) listener(input.value);
     const observedAtMs = Date.now();
     this.#nativeAccountObserver?.observe(parsed);
     this.#observeOfficialTurnStartResponse(parsed);
@@ -1932,9 +1974,30 @@ export class AppServerHost {
     return this.#officialRuntime.request(method, params);
   }
 
+  async #nativeHandoffResponse(method: string, params: JsonObject): Promise<JsonObject | null> {
+    if (typeof params.threadId !== "string" || !isNativeHandoffHistoryRequest(method, params))
+      return null;
+    const record = await this.#repository.findHandoff(params.threadId);
+    if (record?.harnessId !== "codex") return null;
+    try {
+      return await projectNativeHandoffHistory(record, method, params, (name, input) =>
+        this.#requestOfficial(name, input),
+      );
+    } catch (error) {
+      return {
+        error: {
+          code: error instanceof ExternalHistoryRequestError ? -32602 : -32076,
+          message: errorMessage(error),
+        },
+      };
+    }
+  }
+
   async #requestClientNative(method: string, params: JsonObject): Promise<ConsoleHostReply> {
     try {
-      const response = await this.#requestOfficial(method, params);
+      const response =
+        (await this.#nativeHandoffResponse(method, params)) ??
+        (await this.#requestOfficial(method, params));
       if (isRecord(response.error)) {
         return {
           error: {
@@ -3143,20 +3206,66 @@ export class AppServerHost {
     return result;
   }
 
-  async #handleThreadHandoff(request: JsonRpcRequest): Promise<void> {
+  /** The shared owner serializes the route change. The requesting Desktop subscribes
+   * to the native Turn on its own connection, including approvals and tool events. */
+  returnToCodex(
+    request: JsonRpcRequest,
+    native: NativeHandoffRequest,
+    reply: (response: JsonObject) => Promise<void>,
+  ): Promise<void> {
+    const threadId = requestObject(request).threadId;
+    if (typeof threadId !== "string") throw new Error("Invalid Codex handoff Thread");
+    return this.#desktopRequests.run(threadId, () =>
+      this.#externalRuntime.idleRelease.runOperation(threadId, () =>
+        this.#handleThreadHandoff(request, native, reply),
+      ),
+    );
+  }
+
+  async #returnDesktopThreadToCodex(request: JsonRpcRequest, threadId: string): Promise<void> {
+    const events: Array<() => Promise<void>> = [];
+    this.#bufferedNativeHandoffs.set(threadId, events);
+    let accepted = false;
+    const native: NativeHandoffRequest = (method, params) => this.#requestOfficial(method, params);
+    const reply = async (response: JsonObject) => {
+      accepted = !response.error;
+      await this.#writer.json(response);
+    };
+    try {
+      if (this.#options.returnToCodex) {
+        await this.#options.returnToCodex(request, native, reply);
+      } else {
+        await this.#handleThreadHandoff(request, native, reply);
+      }
+    } finally {
+      try {
+        if (accepted) {
+          for (const emit of events) await emit().catch((error) => this.#diagnose(error));
+        }
+      } finally {
+        this.#bufferedNativeHandoffs.delete(threadId);
+      }
+    }
+  }
+
+  async #handleThreadHandoff(
+    request: JsonRpcRequest,
+    native?: NativeHandoffRequest,
+    reply = (response: JsonObject) => this.#writer.json(response),
+  ): Promise<void> {
     const parsed = (
       request.method === HANDOFF_PREVIEW_METHOD
         ? handoffPreviewParamsSchema
         : handoffSendParamsSchema
     ).safeParse(request.params);
     if (!parsed.success) {
-      await this.#writer.json(rpcError(request, -32602, "Invalid Thread handoff request"));
+      await reply(rpcError(request, -32602, "Invalid Thread handoff request"));
       return;
     }
     const { threadId, harnessId } = parsed.data;
     try {
       const send = "requestId" in parsed.data ? (parsed.data as HandoffSendParams) : null;
-      const prior = await this.#repository.find(threadId);
+      const prior = await this.#repository.findHandoff(threadId);
       const digest = send ? handoffDigest([harnessId, send.revision, send.text]) : null;
       const previous = prior?.handoff?.deliveries.find(
         (delivery) => delivery.requestId === send?.requestId,
@@ -3164,14 +3273,14 @@ export class AppServerHost {
       if (previous) {
         if (previous.digest !== digest)
           throw new Error("Handoff request was already used for different input");
-        await this.#writer.json(rpcEnvelope(request, { result: { turnId: previous.turnId } }));
+        await reply(rpcEnvelope(request, { result: { turnId: previous.turnId } }));
         return;
       }
       if (send && this.#uncommittedHandoffs.has(`${threadId}:${send.requestId}`))
         throw new Error("Target accepted this handoff, but the new route could not be saved");
       await this.#waitForPlugins();
       const adapter = this.#externalAdapters.get(harnessId as ExternalHarnessId);
-      if (!adapter) throw new Error("The target Harness is unavailable");
+      if (harnessId !== "codex" && !adapter) throw new Error("The target Harness is unavailable");
       const source = await this.#readHandoffSource(threadId);
       if (source.harnessId === harnessId) throw new Error("The target already owns this Thread");
       if (
@@ -3180,21 +3289,136 @@ export class AppServerHost {
       )
         throw new Error("Wait for the active Turn to finish");
       const preview = previewHandoff(source, harnessId);
+      const original =
+        harnessId === "codex" ? await this.#readCodexHandoffTarget(threadId, source, native) : null;
+      if (original) preview.revision = handoffDigest([preview.revision, original.turns]);
       if (!send) {
-        await this.#writer.json(rpcEnvelope(request, { result: preview }));
+        await reply(rpcEnvelope(request, { result: preview }));
         return;
       }
       if (preview.revision !== send.revision)
         throw new Error("Thread history changed. Review the handoff again.");
       this.#handoffsInFlight.add(threadId);
       try {
-        await this.#sendThreadHandoff(request, send, source, preview.summary, adapter);
+        if (original && native && source.active) {
+          await this.#sendNativeHandoff(
+            request,
+            send,
+            source.active,
+            source.turns,
+            original,
+            preview.summary,
+            native,
+            reply,
+          );
+        } else if (adapter) {
+          await this.#sendThreadHandoff(request, send, source, preview.summary, adapter);
+        } else {
+          throw new Error("Switching to Codex requires the local Desktop");
+        }
       } finally {
         this.#handoffsInFlight.delete(threadId);
       }
     } catch (error) {
-      await this.#writer.json(rpcError(request, -32073, errorMessage(error)));
+      await reply(rpcError(request, -32073, errorMessage(error)));
     }
+  }
+
+  #canReturnToCodex(record: StoredThreadRecordV1): boolean {
+    return (
+      record.handoff?.fromCodex === true &&
+      (!this.#options.externalOnly || this.#options.localNativeHandoff === true) &&
+      !this.#options.sharedThreads?.options.delegateCreates
+    );
+  }
+
+  async #readCodexHandoffTarget(
+    threadId: string,
+    source: HandoffSource & { active?: ExternalThread },
+    native?: NativeHandoffRequest,
+  ): Promise<HandoffSource> {
+    if (!source.active || !this.#canReturnToCodex(source.active.record))
+      throw new Error("Only a local Thread that started in Codex can switch back to Codex");
+    const target = await readOfficialHandoffHistory(
+      threadId,
+      native ?? ((method, params) => this.#requestOfficial(method, params)),
+    );
+    if (
+      target.thread.cwd !== source.thread.cwd ||
+      officialThreadBusy({ ...target.thread, turns: target.turns }) ||
+      this.#officialTurnPending(threadId)
+    )
+      throw new Error("Original Codex Thread is busy or its workspace changed");
+    return target;
+  }
+
+  async #sendNativeHandoff(
+    request: JsonRpcRequest,
+    input: HandoffSendParams,
+    active: ExternalThread,
+    previousTurns: JsonObject[],
+    original: HandoffSource,
+    summary: string,
+    native: NativeHandoffRequest,
+    reply: (response: JsonObject) => Promise<void>,
+  ): Promise<void> {
+    const { threadId, harnessId, requestId, text } = input;
+    const resumed = await native("thread/resume", { threadId, excludeTurns: true });
+    const result = isRecord(resumed.result) ? resumed.result : null;
+    const thread = result && isRecord(result.thread) ? (result.thread as JsonObject) : null;
+    if (thread?.id !== threadId || thread.cwd !== active.cwd || officialThreadBusy(thread))
+      throw new Error("Could not resume the original idle Codex Thread");
+
+    // A failed native start leaves the external mapping intact, so it can be reopened.
+    await this.#externalRuntime.releaseForHandoff(active);
+    const current = await this.#repository.findHandoff(threadId);
+    if (!current || current.harnessId !== active.harnessId || !current.handoff)
+      throw new Error("Thread changed before handoff");
+
+    const turnId = await startNativeHandoff(native, threadId, text, summary, requestId);
+    const marker = handoffMarker(this.#handoffAgentLabel(active.harnessId), "Codex");
+    const previousIds = new Set(previousTurns.map(({ id }) => id));
+    const unprojectedNativeTurns = original.turns.filter(({ id }) => !previousIds.has(id));
+    await this.#repository
+      .commitThreadHandoff({
+        hostThreadId: threadId,
+        createRequestId: current.createRequestId,
+        expectedRevision: current.revision,
+        harnessId,
+        cwd: current.cwd,
+        title: current.title,
+        createdAt: current.createdAt,
+        ephemeral: false,
+        historyMode: current.historyMode,
+        nativeSessionRef: { harnessId, nativeSessionId: threadId, formatVersion: 1 },
+        transportModelId:
+          typeof result?.model === "string" && result.model ? result.model : "codex",
+        handoff: {
+          ...current.handoff,
+          previousTurns: [...previousTurns, ...unprojectedNativeTurns, marker],
+          deliveries: [
+            ...current.handoff.deliveries,
+            { requestId, turnId, text, digest: handoffDigest([harnessId, input.revision, text]) },
+          ],
+        },
+      })
+      .catch((error: unknown) => {
+        this.#uncommittedHandoffs.add(`${threadId}:${requestId}`);
+        throw new Error("Codex accepted this handoff, but the new route could not be saved", {
+          cause: error,
+        });
+      });
+    await this.#notifyExternalThreadStarted(thread).catch((error) => this.#diagnose(error));
+    await reply(rpcEnvelope(request, { result: { turnId } }));
+    await this.#projectHandoffMarker(threadId, marker).catch((error) => this.#diagnose(error));
+  }
+
+  #handoffAgentLabel(id: string): string {
+    if (id === "codex") return "Codex";
+    return (
+      this.#pluginDescriptors.find((plugin) => plugin.id === id)?.name ??
+      (id === "claude-code" ? "Claude Code" : id === "pi" ? "Pi" : id)
+    );
   }
 
   #officialTurnPending(threadId: string): boolean {
@@ -3247,7 +3471,10 @@ export class AppServerHost {
       this.#officialTurnPending(threadId)
     )
       throw new Error("Wait for the active Codex Turn to finish");
-    return source;
+    const previous = await this.#repository.findHandoff(threadId);
+    return previous?.harnessId === "codex"
+      ? { ...source, turns: nativeHandoffHistory(previous, source.turns) }
+      : source;
   }
 
   async #sendThreadHandoff(
@@ -3279,13 +3506,12 @@ export class AppServerHost {
         prepareSharedMemoryInput({ id: threadId, cwd, harnessId }, text, `handoff:${requestId}`),
       );
       const { state, turnId } = accepted;
-      const label = (id: string) =>
-        id === "codex"
-          ? "Codex"
-          : (this.#pluginDescriptors.find((plugin) => plugin.id === id)?.name ??
-            (id === "claude-code" ? "Claude Code" : id === "pi" ? "Pi" : id));
-      const marker = handoffMarker(label(source.harnessId), label(harnessId));
-      const earlier = source.active?.record.handoff;
+      const marker = handoffMarker(
+        this.#handoffAgentLabel(source.harnessId),
+        this.#handoffAgentLabel(harnessId),
+      );
+      const prior = source.active?.record ?? (await this.#repository.findHandoff(threadId));
+      const earlier = prior?.handoff;
       const record = await this.#repository
         .commitThreadHandoff({
           hostThreadId: threadId,
@@ -3300,7 +3526,7 @@ export class AppServerHost {
                 : "",
           ephemeral: false,
           historyMode: source.thread.historyMode === "paginated" ? "paginated" : "legacy",
-          expectedRevision: source.active?.record.revision ?? null,
+          expectedRevision: prior?.revision ?? null,
           createdAt:
             typeof source.thread.createdAt === "number"
               ? new Date(source.thread.createdAt * 1000).toISOString()
@@ -3677,6 +3903,7 @@ export class AppServerHost {
                     resolution.thread.stateObserver.state.effectivePermissionModeId,
                 }
               : {}),
+            ...(this.#canReturnToCodex(resolution.thread.record) ? { canReturnToCodex: true } : {}),
             history: resolution.thread.session.capabilities.history,
             ...(threadUsage ? { usage: threadUsage } : {}),
             locked: true,

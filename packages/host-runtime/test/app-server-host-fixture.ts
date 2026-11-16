@@ -280,6 +280,7 @@ export function createFixture(
     mappingStore?: AppServerHostOptions["mappingStore"];
     mappingStoreDirectory?: string;
     closeMappingStoreOnExit?: boolean;
+    returnToCodex?: AppServerHostOptions["returnToCodex"];
     desktopOutput?: PassThrough;
     officialExitsOnInputEnd?: boolean;
     createOfficialConnection?: () =>
@@ -345,6 +346,7 @@ export function createFixture(
     desktopOutput,
     diagnosticOutput,
     mappingStore,
+    ...(options.returnToCodex ? { returnToCodex: options.returnToCodex } : {}),
     ...(options.closeMappingStoreOnExit !== undefined
       ? { closeMappingStoreOnExit: options.closeMappingStoreOnExit }
       : {}),

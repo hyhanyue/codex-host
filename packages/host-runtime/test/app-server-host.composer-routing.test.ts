@@ -111,6 +111,7 @@ function fixture(
   });
   let active = false;
   let queued = false;
+  let rejectNativeTurn = false;
   let turns: JsonObject[] = [codexTurn];
   const native: JsonObject[] = [];
   const thread = {
@@ -134,6 +135,19 @@ function fixture(
       buffer = buffer.slice(newline + 1);
       native.push(request);
       if (request.id === undefined) continue;
+      if (request.method === "turn/start" && rejectNativeTurn) {
+        writeRequest(value.official.stdout, {
+          id: request.id,
+          error: { code: -32000, message: "Codex refused" },
+        });
+        continue;
+      }
+      if (request.method === "turn/start" && messageParams(request).additionalContext) {
+        writeRequest(value.official.stdout, {
+          method: "turn/started",
+          params: { threadId, turn: { id: "native-turn", status: "inProgress", items: [] } },
+        });
+      }
       const result =
         request.method === "thread/read"
           ? {
@@ -149,7 +163,12 @@ function fixture(
               ? { data: queued ? [{ id: "queued-input" }] : [], nextCursor: null }
               : request.method === "thread/list"
                 ? { data: [thread], nextCursor: null, backwardsCursor: null }
-                : { userAgent: "test", turn: { id: "native-turn" } };
+                : request.method === "thread/resume"
+                  ? {
+                      thread: { ...thread, status: { type: active ? "active" : "idle" } },
+                      model: "gpt-test",
+                    }
+                  : { userAgent: "test", turn: { id: "native-turn" } };
       writeRequest(value.official.stdout, { id: request.id, result });
     }
   });
@@ -160,6 +179,9 @@ function fixture(
     native,
     setBusy(busy: boolean) {
       active = busy;
+    },
+    setRejectNativeTurn(reject: boolean) {
+      rejectNativeTurn = reject;
     },
     setQueued(value: boolean) {
       queued = value;
@@ -456,6 +478,164 @@ it("keeps native handoff execution on the local shared owner after Desktop disco
   } finally {
     if (disconnected) await closeFixture(desktop);
     else await stopFixture(desktop);
+    peer.close();
+    await stopFixture(core);
+  }
+});
+
+it("switches back to native Codex on the same Desktop Thread, then hands off again", async () => {
+  const adapter = new RecordingAdapter(harnessIdSchema.parse("pi"), catalog);
+  const core = fixture(adapter, undefined, true, {
+    externalOnly: true,
+    localNativeHandoff: true,
+  });
+  const peer = new StreamThreadPeer(core.desktopOutput, core.desktopInput, () => {});
+  const outbound = { threadId, harnessId: "pi" };
+  // Wait for the shared store to initialize before attaching the Desktop.
+  expect(await peer.request(HANDOFF_PREVIEW_METHOD, outbound)).toHaveProperty("result.revision");
+  const bridge = new SharedThreadBridge({
+    connect: async () => peer,
+    delegateCreates: true,
+    diagnose: () => {},
+  });
+  const desktop = fixture(adapter, undefined, true, {
+    mappingStore: core.mappingStore,
+    closeMappingStoreOnExit: false,
+    sharedThreads: bridge,
+    returnToCodex: core.host.returnToCodex.bind(core.host),
+  });
+  const inbound = { threadId, harnessId: "codex" };
+  const preview = (target: typeof outbound) => desktop.request(HANDOFF_PREVIEW_METHOD, target);
+  const send = (target: typeof outbound, revision: JsonObject, text: string) =>
+    desktop.request(HANDOFF_SEND_METHOD, {
+      ...target,
+      revision: revision.revision ?? null,
+      requestId: randomUUID(),
+      text,
+    });
+  try {
+    const firstPreview = await preview(outbound);
+    const first = await send(outbound, firstPreview.result as JsonObject, "Try Pi here.");
+    expect(first).toHaveProperty("result.turnId");
+    expect(await preview(inbound)).toHaveProperty("error");
+    const externalTurnId = String((first.result as JsonObject).turnId);
+    const session = firstSession(adapter);
+    session.appendText("Pi completed the work.");
+    session.succeedTurn();
+    await core.collector.waitFor((message) => turnEvent(message, "turn/completed", externalTurnId));
+    adapter.restore = session.persistedSnapshot();
+
+    expect(await desktop.request("codexhost/thread/inspect", { threadId })).toMatchObject({
+      result: { owner: "external", canReturnToCodex: true },
+    });
+    const back = await preview(inbound);
+    expect(back.result).toMatchObject({
+      summary: expect.stringContaining("Pi completed the work."),
+    });
+    const input = {
+      ...inbound,
+      revision: (back.result as JsonObject).revision ?? null,
+      requestId: randomUUID(),
+      text: "Review the work in Codex.",
+    };
+    desktop.setRejectNativeTurn(true);
+    expect(await desktop.request(HANDOFF_SEND_METHOD, input)).toMatchObject({
+      error: { message: "Codex refused" },
+    });
+    expect(await desktop.request("codexhost/thread/inspect", { threadId })).toMatchObject({
+      result: { owner: "external", canReturnToCodex: true },
+    });
+    desktop.setRejectNativeTurn(false);
+    const accepted = await desktop.request(HANDOFF_SEND_METHOD, input);
+    expect(accepted.result).toEqual({ turnId: "native-turn" });
+    const started = await desktop.collector.waitFor((message) =>
+      turnEvent(message, "turn/started", "native-turn"),
+    );
+    expect(desktop.collector.messages.indexOf(accepted)).toBeLessThan(
+      desktop.collector.messages.indexOf(started),
+    );
+    expect((await desktop.request(HANDOFF_SEND_METHOD, input)).result).toEqual(accepted.result);
+    expect(desktop.native.filter(({ method }) => method === "turn/start")).toEqual([
+      expect.objectContaining({
+        params: expect.objectContaining({ clientUserMessageId: input.requestId }),
+      }),
+      expect.objectContaining({
+        params: {
+          threadId,
+          clientUserMessageId: input.requestId,
+          input: [{ type: "text", text: input.text }],
+          additionalContext: {
+            codexhostHandoff: {
+              kind: "untrusted",
+              name: "Previous Agent transcript",
+              value: expect.stringContaining("Pi completed the work."),
+            },
+          },
+        },
+      }),
+    ]);
+    expect(core.native.filter(({ method }) => method === "turn/start")).toHaveLength(0);
+    expect(await desktop.request("codexhost/thread/inspect", { threadId })).toMatchObject({
+      result: { owner: "codex" },
+    });
+
+    const nativeTurn = {
+      ...codexTurn,
+      id: "native-turn",
+      items: [{ id: "codex-return-reply", type: "agentMessage", text: "Codex reviewed the work." }],
+    };
+    core.appendTurn(nativeTurn);
+    desktop.appendTurn(nativeTurn);
+    writeRequest(desktop.official.stdout, {
+      method: "turn/completed",
+      params: { threadId, turn: nativeTurn },
+    });
+    const page = await desktop.request("thread/turns/list", {
+      threadId,
+      sortDirection: "asc",
+      itemsView: "full",
+      limit: 10,
+    });
+    const turns = (page.result as JsonObject).data as JsonObject[];
+    expect(turns.map(({ id }) => id)).toEqual([
+      codexTurn.id,
+      expect.any(String),
+      externalTurnId,
+      expect.any(String),
+      nativeTurn.id,
+    ]);
+    expect(turns[3]).toMatchObject({ items: [{ text: "**Agent handoff · Pi → Codex**" }] });
+    expect(
+      await desktop.request("thread/resume", {
+        threadId,
+        excludeTurns: true,
+        initialTurnsPage: { sortDirection: "asc", limit: 10 },
+      }),
+    ).toMatchObject({
+      result: {
+        thread: { id: threadId, turns: [] },
+        initialTurnsPage: {
+          data: expect.arrayContaining([expect.objectContaining({ id: externalTurnId })]),
+        },
+      },
+    });
+    expect(await desktop.request("thread/list", {})).toMatchObject({
+      result: { data: [{ id: threadId, modelProvider: "openai" }] },
+    });
+    const again = await preview(outbound);
+    expect(again.result).toMatchObject({
+      summary: expect.stringContaining("Codex reviewed the work."),
+    });
+    const next = await send(outbound, again.result as JsonObject, "Hand off to Pi again.");
+    expect(next).toHaveProperty("result.turnId");
+    const nextId = String((next.result as JsonObject).turnId);
+    adapter.sessions.at(-1)?.succeedTurn();
+    await core.collector.waitFor((message) => turnEvent(message, "turn/completed", nextId));
+    expect(await desktop.request("codexhost/thread/inspect", { threadId })).toMatchObject({
+      result: { owner: "external", canReturnToCodex: true },
+    });
+  } finally {
+    await stopFixture(desktop);
     peer.close();
     await stopFixture(core);
   }
