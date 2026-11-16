@@ -268,6 +268,43 @@ describe("local Codex read-only identity startup", () => {
     );
   });
 
+  it("refreshes the idle backend when Desktop rotates its native tool connection", async () => {
+    const first = nativeFixture();
+    const local = await startLocal(true);
+    const configuration = {
+      stockCodexPath: "/synthetic/codex",
+      arguments: ["-c", "features.code_mode_host=true", "app-server"],
+      environment: { CODEX_APP_TOOLS_PIPE_PATH: "/synthetic/desktop-old.sock" },
+    };
+    await local.configureStartup(configuration);
+    await local.officialRuntimeScope.start();
+    const replacement = {
+      ...configuration,
+      environment: { CODEX_APP_TOOLS_PIPE_PATH: "/synthetic/desktop-new.sock" },
+    };
+
+    first.notify({
+      method: "turn/started",
+      params: { threadId: "active-thread" },
+    });
+    await vi.waitFor(() => expect(local.officialRuntimeScope.owner.hasActiveWork).toBe(true));
+    await local.configureStartup(replacement);
+    expect(first.stop).not.toHaveBeenCalled();
+
+    first.notify({ method: "turn/completed", params: { threadId: "active-thread" } });
+    await vi.waitFor(() => expect(local.officialRuntimeScope.owner.hasActiveWork).toBe(false));
+    nativeFixture();
+    await local.configureStartup(replacement);
+    await local.officialRuntimeScope.start();
+    await local.configureStartup(replacement);
+
+    expect(first.stop).toHaveBeenCalledOnce();
+    expect(createOwnedLoopbackBackend).toHaveBeenCalledTimes(2);
+    expect(createOwnedLoopbackBackend).toHaveBeenLastCalledWith(
+      expect.objectContaining({ environment: expect.objectContaining(replacement.environment) }),
+    );
+  });
+
   it("continues Desktop startup after recording its arguments fails", async () => {
     nativeFixture();
     const diagnostics = new PassThrough();

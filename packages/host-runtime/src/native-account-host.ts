@@ -9,6 +9,10 @@ import {
   type CodexAccountControl,
 } from "./account/codex-account-control.js";
 import { officialEnvironment } from "./app-server-host.js";
+import {
+  desktopToolEnvironmentKeys,
+  withoutDesktopToolEnvironment,
+} from "./desktop-startup-context.js";
 import { OfficialRuntimeScope } from "./codex-runtime/official-runtime-scope.js";
 import { createOwnedLoopbackBackend } from "./codex-runtime/owned-official-backends.js";
 import { resolveOfficialCodexExecutable } from "./codex-runtime/command.js";
@@ -61,7 +65,10 @@ export async function prepareLocalCodex(input: {
       input.deferStart && !input.remoteControl
         ? ["-c", "features.code_mode_host=true", "app-server"]
         : [...input.arguments],
-    environment: input.environment,
+    environment:
+      input.deferStart && !input.remoteControl
+        ? withoutDesktopToolEnvironment(input.environment)
+        : input.environment,
   };
   if (startupFile) {
     try {
@@ -222,7 +229,10 @@ export async function prepareLocalCodex(input: {
       }
       const changed =
         startup.stockCodexPath !== next.stockCodexPath ||
-        JSON.stringify(startup.arguments) !== JSON.stringify(next.arguments);
+        JSON.stringify(startup.arguments) !== JSON.stringify(next.arguments) ||
+        desktopToolEnvironmentKeys.some(
+          (key) => startup.environment[key] !== next.environment[key],
+        );
       if (changed && scope.owner.generation > 0 && scope.owner.hasActiveWork) {
         input.diagnosticOutput.write(
           "codexhost: Desktop startup differs; preserving active official Codex work\n",

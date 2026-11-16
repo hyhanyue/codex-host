@@ -7,6 +7,7 @@ import {
 } from "@codexhost/desktop-control";
 import { WebSocket, createWebSocketStream } from "ws";
 import { StreamThreadPeer, type SharedThreadPeer } from "./shared-thread-peer.js";
+import { writeDesktopStartupContext } from "./desktop-startup-context.js";
 
 async function connectStream(
   launch: HostServiceLaunch,
@@ -17,21 +18,7 @@ async function connectStream(
     path.join(launch.dataDirectory, "client-hosts"),
   );
   if (descriptor?.owner !== "service") throw new Error("Independent Host is unavailable");
-  const context = desktop
-    ? Buffer.from(
-        JSON.stringify({
-          version: 1,
-          arguments: desktop.arguments,
-          environment: Object.fromEntries(
-            Object.entries(desktop.environment).filter(
-              ([key, value]) => key.startsWith("CODEXHOST_") && value !== undefined,
-            ),
-          ),
-        }),
-      ).toString("base64")
-    : undefined;
-  if (context && context.length > 16_000)
-    throw new Error("Desktop runtime context exceeds its transport limit");
+  const context = desktop && writeDesktopStartupContext(desktop);
   const socket = new WebSocket(`ws://127.0.0.1:${descriptor.port}/v1/desktop`, {
     headers: {
       authorization: `Bearer ${descriptor.token}`,

@@ -9,57 +9,12 @@ import type { PreparedLocalCodex } from "./native-account-host.js";
 import { installedHarnessPluginOptions } from "./installed-harness-plugins.js";
 import type { RemoteAppServerSession, RemoteAppServerSessionStreams } from "./remote-app-server.js";
 import type { DelegationControlRegistration } from "./delegation-types.js";
-import {
-  DELEGATION_RUNTIME_ENDPOINT_ENV,
-  DELEGATION_RUNTIME_TOKEN_ENV,
-} from "./delegation-types.js";
+import { readDesktopStartupContext } from "./desktop-startup-context.js";
 import type { ModelPriceCatalog } from "./model-prices.js";
 import { RuntimeMaintenance } from "./runtime-maintenance.js";
 import { consoleEntrypoint, createHostConsoleOpener } from "./console-opener.js";
 import { createHostWebOpener } from "./web-opener.js";
 import type { HostUpdateCoordinator } from "./update-coordinator.js";
-
-/** Runtime/control context is private to an authenticated Desktop connection. It
- * cannot change the service's data root, native account home or execution owner. */
-function desktopContext(
-  base: NodeJS.ProcessEnv,
-  request?: IncomingMessage,
-): { environment: NodeJS.ProcessEnv; arguments: string[] | undefined } {
-  const raw = request?.headers["x-codexhost-desktop-context"];
-  if (raw === undefined) return { environment: base, arguments: undefined };
-  if (typeof raw !== "string" || raw.length > 16_000)
-    throw new Error("Invalid Desktop runtime context");
-  const value: unknown = JSON.parse(Buffer.from(raw, "base64").toString("utf8"));
-  if (!value || typeof value !== "object" || Array.isArray(value))
-    throw new Error("Invalid Desktop runtime context");
-  const envelope = value as Record<string, unknown>;
-  if (
-    envelope.version !== 1 ||
-    !Array.isArray(envelope.arguments) ||
-    !envelope.arguments.every((argument) => typeof argument === "string") ||
-    !envelope.environment ||
-    typeof envelope.environment !== "object" ||
-    Array.isArray(envelope.environment)
-  )
-    throw new Error("Invalid Desktop runtime context");
-  const context: NodeJS.ProcessEnv = {};
-  for (const [key, entry] of Object.entries(envelope.environment)) {
-    if (!key.startsWith("CODEXHOST_") || typeof entry !== "string")
-      throw new Error("Invalid Desktop runtime context field");
-    context[key] = entry;
-  }
-  return {
-    arguments: envelope.arguments as string[],
-    environment: {
-      ...base,
-      ...context,
-      CODEXHOST_DATA_DIR: base.CODEXHOST_DATA_DIR,
-      CODEX_HOME: base.CODEX_HOME,
-      [DELEGATION_RUNTIME_ENDPOINT_ENV]: base[DELEGATION_RUNTIME_ENDPOINT_ENV],
-      [DELEGATION_RUNTIME_TOKEN_ENV]: base[DELEGATION_RUNTIME_TOKEN_ENV],
-    },
-  };
-}
 
 export function sharedHostDesktop(
   options: {
@@ -79,7 +34,10 @@ export function sharedHostDesktop(
   streams: RemoteAppServerSessionStreams,
   request?: IncomingMessage,
 ): RemoteAppServerSession {
-  const { environment, arguments: nativeArguments } = desktopContext(options.environment, request);
+  const { environment, arguments: nativeArguments } = readDesktopStartupContext(
+    options.environment,
+    request?.headers["x-codexhost-desktop-context"],
+  );
   let startup: Promise<void> | undefined;
   if (nativeArguments) {
     const stockCodexPath = environment.CODEXHOST_STOCK_CODEX_PATH ?? options.stockCodex;
