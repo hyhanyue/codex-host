@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { it } from "node:test";
 import type { ThreadUsageSnapshot } from "@codexhost/shared-contracts";
 import { chromium } from "playwright";
 
+import { FakeChChannel, startFakeChChannel } from "../support/ch-channel.ts";
 import { FakeChHost, startFakeChDebugger } from "../support/ch-host.ts";
 import { startServer } from "../support/server.ts";
 
@@ -124,3 +126,84 @@ for (const scenario of cases) {
     },
   );
 }
+
+it(
+  "updates usage timing in a newly bound conversation without reopening it",
+  { timeout: 30_000 },
+  async (t) => {
+    const directory = mkdtempSync(join(tmpdir(), "ch-browser-live-usage-"));
+    t.after(() => rmSync(directory, { recursive: true, force: true }));
+    const host = new FakeChChannel();
+    host.add("existing", "/computer/timing", "Existing timing workspace");
+    let usage: ThreadUsageSnapshot | null = null;
+    const request = host.request.bind(host);
+    host.request = async <T>(method: string, params: Record<string, unknown>): Promise<T> =>
+      method === "codexhost/thread/usage/inspect"
+        ? ({
+            threadId: params.threadId,
+            usage,
+            accountCredits: { usedPercent: 5, periodType: "weekly" },
+          } as T)
+        : request<T>(method, params);
+    const debuggerServer = await startFakeChDebugger(host);
+    t.after(() => debuggerServer.close());
+    const channel = await startFakeChChannel(host, directory);
+    t.after(() => channel.close());
+    const url = await startServer(
+      t,
+      resolve(import.meta.dirname, "../.."),
+      ["--import", "tsx", "src/main.ts"],
+      [
+        "--ch-cdp",
+        debuggerServer.endpoint,
+        "--ch-control-directory",
+        directory,
+        "--harness",
+        "fake",
+      ],
+    );
+    const executablePath = process.env.CODEXHOST_PLAYWRIGHT_EXECUTABLE_PATH;
+    const browser = await chromium.launch(executablePath ? { executablePath } : {});
+    t.after(() => browser.close());
+    const page = await browser.newPage({ viewport: { width: 1280, height: 900 }, locale: "en-US" });
+    page.setDefaultTimeout(6000);
+    const follows = new Set<string>();
+    const timingFrames: string[] = [];
+    page.on("websocket", (socket) => {
+      socket.on("framesent", ({ payload }) => {
+        const frame = JSON.parse(String(payload));
+        if (frame.type === "open" && frame.endpoint === "session/follow")
+          follows.add(frame.streamId);
+      });
+      socket.on("framereceived", ({ payload }) => {
+        const frame = JSON.parse(String(payload));
+        if (
+          follows.has(frame.streamId) &&
+          frame.value?.key === "codexhostUsage" &&
+          frame.value?.value?.usage?.outputTokensPerSecond !== undefined
+        )
+          timingFrames.push(frame.value.sessionId);
+      });
+    });
+    await page.goto(url);
+    await page.locator('[data-composer-input][contenteditable="true"]').fill("measure this turn");
+    await page.getByRole("button", { name: "Send message", exact: true }).click();
+    await page.getByText("CH response: measure this turn", { exact: true }).waitFor();
+    const thread = [...host.threads.values()].find((row) => row.id.startsWith("canonical-"));
+    assert.ok(thread);
+    await page.locator('[data-composer-stat="codexhost-quota"] button').waitFor();
+    usage = { timeToFirstOutputMs: 950 };
+    host.changed(thread.id, "codexhost/thread/usage/updated");
+
+    const meter = page.locator('[data-composer-stat="codexhost-usage"] button');
+    await meter.waitFor({ timeout: 6000 });
+    await meter.click();
+    const dialog = page.getByRole("dialog", { name: "Usage details", exact: true });
+    await dialog.getByText("950 ms", { exact: true }).waitFor();
+
+    usage = { ...usage, outputTokensPerSecond: 73 };
+    host.changed(thread.id, "codexhost/thread/usage/updated");
+    await dialog.getByText("73 tok/s", { exact: true }).waitFor();
+    assert.ok(timingFrames.includes(thread.id));
+  },
+);

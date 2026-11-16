@@ -126,6 +126,8 @@ function summaryParts(usage: HostThreadUsage | null, t: Translate): string[] {
     return [`${tokenCount(usage.totalTokens)} ${t("usage.unit.tokens")}`];
   const context = contextPercent(usage);
   if (context !== undefined) return [`${t("usage.context")}: ${percent(context)}`];
+  if (usage.timeToFirstOutputMs !== undefined)
+    return [`${t("usage.ttft")} ${latency(usage.timeToFirstOutputMs, t)}`];
   return [];
 }
 

@@ -87,6 +87,7 @@ import {
   decodeAntigravityPermissionModeId,
   type AntigravityPermissionMode,
 } from "./permission-modes.js";
+import { AntigravityOutputTiming } from "./output-timing.js";
 import { rollbackAntigravityLastTurn } from "./rollback.js";
 import { ANTIGRAVITY_COMMAND_CATALOG, parseAndFormatAntigravityCommand } from "./slash-commands.js";
 import {
@@ -161,6 +162,7 @@ interface ActiveTurn {
   /** First tool denial of the Turn, kept to explain an otherwise empty result. */
   permissionDenial: string | null;
   latestUsage: HostUsage | null;
+  outputTiming: AntigravityOutputTiming;
   contextUsagePromise: Promise<Pick<
     HostUsage,
     "contextUsedTokens" | "contextWindowTokens"
@@ -875,6 +877,7 @@ class AntigravitySession implements HarnessSession {
       nativePermissionMode: null,
       permissionDenial: null,
       latestUsage: null,
+      outputTiming: new AntigravityOutputTiming(),
       contextUsagePromise: null,
       queue: Promise.resolve(),
       codeActionCursor: 0,
@@ -888,10 +891,16 @@ class AntigravitySession implements HarnessSession {
     child.stderr.setEncoding("utf8").on("data", (chunk: string) => {
       active.stderr = (active.stderr + chunk).slice(-8_000);
     });
+    let stdoutReceivedAtMs = 0;
+    // Timestamp each chunk before readline splits it or queued tool projection delays it.
+    child.stdout.on("data", () => {
+      stdoutReceivedAtMs = performance.now();
+    });
     const lines = readline.createInterface({ input: child.stdout });
     lines.on("line", (line) => {
+      const receivedAtMs = stdoutReceivedAtMs;
       const event = parseAntigravityStreamLine(line);
-      if (event) this.#enqueue(active, () => this.#handleEvent(active, event));
+      if (event) this.#enqueue(active, () => this.#handleEvent(active, event, receivedAtMs));
       else if (line.trim()) active.stderr = (active.stderr + `\n${line}`).slice(-8_000);
     });
     child.once("error", (error) => {
@@ -979,7 +988,11 @@ class AntigravitySession implements HarnessSession {
     });
   }
 
-  async #handleEvent(active: ActiveTurn, event: AntigravityStreamEvent): Promise<void> {
+  async #handleEvent(
+    active: ActiveTurn,
+    event: AntigravityStreamEvent,
+    receivedAtMs: number,
+  ): Promise<void> {
     if (this.#active !== active) return;
     if (event.event === "init") {
       active.nativePermissionMode = event.init?.permission_mode ?? null;
@@ -1008,8 +1021,13 @@ class AntigravitySession implements HarnessSession {
     if (event.event === "step_update") {
       if (event.step_update.conversation_id !== this.#nativeRef?.nativeSessionId) return;
       await this.#handleStep(active, event.step_update);
+      if (this.#active !== active) return;
       const usage = hostUsage(event.step_update.usage, active.model?.id, "request");
-      if (usage) this.#publishUsage(active, usage);
+      const speed = active.outputTiming.observe(event.step_update, receivedAtMs);
+      if (usage) {
+        if (speed !== undefined) usage.outputTokensPerSecond = speed;
+        this.#publishUsage(active, usage);
+      }
       this.#ensureContextUsage(active, event.step_update.conversation_id);
       return;
     }
