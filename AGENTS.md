@@ -98,6 +98,12 @@ Existing Harness integration and Desktop update audit skills remain applicable t
 - For core logic or major feature changes, update the corresponding feature document in `docs/`, creating one only when needed. Describe current behavior and key constraints; prefer maintaining an existing document over adding a change report. Minor fixes and local refactors need no documentation changes.
 - Keep `docs/index.md` links and one-line descriptions current when adding, moving, or removing documents. Introduce feature-based subdirectories as navigation needs grow.
 
+### Required Desktop Agent switching regression
+
+- Before merging or pushing a change to `main`, run `npm run test:desktop-draft-switch` from the candidate commit. Install Chromium with `npx playwright install chromium` when setting up the test environment. CI runs this check on code pull requests and every push to `main`. A failed check blocks completion.
+- When upgrading Codex Desktop compatibility or changing the launcher, shim, Composer, or draft routing, also check the resulting CodexHost build with the target ChatGPT Desktop version. Launch through CodexHost, open an empty new chat, select Antigravity CLI and confirm the Agent and its model control update. Switch back to Codex before sending and confirm that its native model control returns. Open a second blank chat and repeat the switch. Record the Desktop version/build, tested CodexHost commit or package, and the observed results before calling the fix verified or publishing its installer.
+- If the Desktop version changes the native draft structure, add coverage for that structure while retaining fixtures for previously supported versions. The Chromium check uses simulated native bindings to verify first-turn routing. Verify the installed picker with the Desktop check above.
+
 ## Commit & Pull Request Guidelines
 
 - Use concise, imperative commit subjects. Conventional Commit prefixes such as `feat:`, `fix:`, `docs:`, and `test:` are preferred.

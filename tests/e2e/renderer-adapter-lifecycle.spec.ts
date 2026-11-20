@@ -114,7 +114,24 @@ const { outputFiles } = await build({
         const secondDraftRow = Object.assign([...row], { 9: secondUpdate, 12: secondUpdate,
           13: { draftSettings: draft, isNewThreadDraft: true, updateDraftSettings: secondUpdate } });
         const secondModelRow = Object.assign([...modelRow], { 13: secondUpdate });
-        fiber.updateQueue = { memoCache: { data: [row, modeRow, modelRow, secondDraftRow, secondModelRow] } };
+        let memoRows = [row, modeRow, modelRow, secondDraftRow, secondModelRow];
+        if (config.desktop1117) {
+          // The compiled Model hook reserves its memo row before the nested draft hook runs.
+          const { modelSettings } = modelRow[23];
+          const currentModel = Array(37).fill(null);
+          Object.assign(currentModel, {
+            16: null, 21: true, 24: updateDraft, 25: usesAccountPreferences,
+            27: setModel, 32: modelSettings, 33: setModel,
+            36: { modelSettings, usesAccountPreferences, setModelAndReasoningEffort: setModel },
+          });
+          const currentMode = Array(55).fill(null);
+          Object.assign(currentMode, {
+            42: modelSettings.model, 43: modelSettings.reasoningEffort,
+            44: nativeMode.settings, 47: nativeMode, 52: nativeMode, 54: { activeMode: nativeMode },
+          });
+          memoRows = [currentMode, currentModel, row];
+        }
+        fiber.updateQueue = { memoCache: { data: memoRows } };
         Object.defineProperty(editor, "__reactFiber$host", { value: fiber });
         const form = document.createElement("form");
         form.innerHTML = '<button type="submit">Send</button>';
@@ -307,11 +324,18 @@ test("only the identified external draft carries its selection into native reque
 
 for (const reserveActive of [false, true]) {
   for (const usesAccountPreferences of [false, true]) {
-    for (const agent of ["pi", "claude-code", "opencode"]) {
+    for (const agent of ["pi", "claude-code", "opencode", "antigravity"]) {
       test(`Send creates and starts ${agent} with account preferences ${usesAccountPreferences} and reserve ${reserveActive}`, async ({
         page,
       }) => {
-        await setup(page, "local", { emptyDraft: true, usesAccountPreferences, reserveActive });
+        const desktop1117 = agent === "antigravity";
+        await setup(page, "local", {
+          emptyDraft: true,
+          usesAccountPreferences,
+          reserveActive,
+          desktop1117,
+          background: desktop1117 && reserveActive,
+        });
         const applied = await page.evaluate((agent) => {
           const state = Reflect.get(globalThis, "hostRoutes");
           return state.adapter.applyAgent(
@@ -323,6 +347,28 @@ for (const reserveActive of [false, true]) {
           );
         }, agent);
         expect(applied).toBe(true);
+        if (desktop1117) {
+          const roundTrip = await page.evaluate((agent) => {
+            const state = Reflect.get(globalThis, "hostRoutes");
+            const restored = state.adapter.applyAgent(
+              "codex",
+              undefined,
+              undefined,
+              undefined,
+              state.editor,
+            );
+            const nativeModel = state.readDraft().modelSettings;
+            const selectedAgain = state.adapter.applyAgent(
+              agent,
+              { id: "regression-model" },
+              undefined,
+              undefined,
+              state.editor,
+            );
+            return { restored, nativeModel, selectedAgain };
+          }, agent);
+          expect(roundTrip).toEqual({ restored: true, nativeModel: null, selectedAgain: true });
+        }
         await page.getByRole("button", { name: "Send", exact: true }).click();
         await expect
           .poll(() =>

@@ -103,7 +103,7 @@ describe("native prewarm consumption isolation", () => {
   );
 });
 
-it("binds the reviewed draft setter tuple to its exact client identity", () => {
+it.each([0, 1])("binds only the owning draft setter (offset %i)", (shift) => {
   const update = vi.fn();
   const draft = { modelSettings: null, isManuallyChanged: false };
   const row = Array<unknown>(14).fill(null);
@@ -118,16 +118,16 @@ it("binds the reviewed draft setter tuple to its exact client identity", () => {
   });
   const context = { usesAccountPreferences: true };
   const setModel = vi.fn();
-  const modelRow = Array<unknown>(24).fill(null);
+  const modelRow = Array<unknown>(24 + shift).fill(null);
   Object.assign(modelRow, {
     7: null,
-    10: true,
-    12: context,
-    13: update,
-    14: setModel,
-    20: setModel,
-    21: context,
-    23: { ...context, setModelAndReasoningEffort: setModel },
+    [10 + shift]: true,
+    [12 + shift]: context,
+    [13 + shift]: update,
+    [14 + shift]: setModel,
+    [20 + shift]: setModel,
+    [21 + shift]: context,
+    [23 + shift]: { ...context, setModelAndReasoningEffort: setModel },
   });
   const data = [row, modelRow];
   const element = {
@@ -144,7 +144,7 @@ it("binds the reviewed draft setter tuple to its exact client identity", () => {
     12: otherUpdate,
     13: { draftSettings: draft, isNewThreadDraft: true, updateDraftSettings: otherUpdate },
   });
-  data.push(otherDraftRow, Object.assign([...modelRow], { 13: otherUpdate }));
+  data.push(otherDraftRow, Object.assign([...modelRow], { [13 + shift]: otherUpdate }));
   expect(findScopedDraftModelBinding(element, "client-new-thread:a")).toMatchObject({
     usesAccountPreferences: true,
   });
@@ -154,15 +154,15 @@ it("binds the reviewed draft setter tuple to its exact client identity", () => {
   expect(findScopedDraftModelBinding(root, "client-new-thread:a")).toMatchObject({
     usesAccountPreferences: true,
   });
-  modelRow[13] = vi.fn();
+  modelRow[13 + shift] = vi.fn();
   expect(findScopedDraftModelBinding(element, "client-new-thread:a")).toBeNull();
-  modelRow[13] = update;
+  modelRow[13 + shift] = update;
   const conflicting = { usesAccountPreferences: false };
   data.push(
     Object.assign([...modelRow], {
-      12: conflicting,
-      21: conflicting,
-      23: { ...conflicting, setModelAndReasoningEffort: setModel },
+      [12 + shift]: conflicting,
+      [21 + shift]: conflicting,
+      [23 + shift]: { ...conflicting, setModelAndReasoningEffort: setModel },
     }),
   );
   expect(findScopedDraftModelBinding(element, "client-new-thread:a")).toBeNull();
@@ -170,6 +170,77 @@ it("binds the reviewed draft setter tuple to its exact client identity", () => {
   expect(findScopedDraftModelBinding(element, "client-new-thread:b")).toBeNull();
   row[12] = vi.fn();
   expect(findScopedDraftModelBinding(element, "client-new-thread:a")).toBeNull();
+});
+it("binds Desktop 26.1117's local draft writer and creation mode", () => {
+  const draftId = "client-new-thread:a";
+  const update = vi.fn();
+  const draft = { modelSettings: null, isManuallyChanged: false };
+  const draftRow = Array<unknown>(14).fill(null);
+  Object.assign(draftRow, {
+    6: draftId,
+    7: draftId,
+    9: update,
+    10: draft,
+    11: true,
+    12: update,
+    13: { draftSettings: draft, isNewThreadDraft: true, updateDraftSettings: update },
+  });
+
+  const modelSettings = { model: "native-model", reasoningEffort: "high" };
+  const setModel = vi.fn();
+  const nextTurn = vi.fn();
+  const modelRow = Array<unknown>(37).fill(null);
+  Object.assign(modelRow, {
+    16: null,
+    21: true,
+    24: update,
+    25: false,
+    27: setModel,
+    32: modelSettings,
+    33: setModel,
+    35: nextTurn,
+    36: {
+      modelSettings,
+      usesAccountPreferences: false,
+      setModelAndReasoningEffort: setModel,
+      setModelAndReasoningEffortForNextTurn: nextTurn,
+    },
+  });
+
+  const mode = { settings: { model: modelSettings.model } };
+  const collaborationRow = Array<unknown>(55).fill(null);
+  Object.assign(collaborationRow, {
+    42: modelSettings.model,
+    43: modelSettings.reasoningEffort,
+    44: mode.settings,
+    47: mode,
+    52: mode,
+    54: { activeMode: mode },
+  });
+  const element = {
+    parentElement: null,
+    __reactFiber$test: {
+      updateQueue: { memoCache: { data: [collaborationRow, modelRow, draftRow] } },
+    },
+  };
+  expect(findScopedDraftModelBinding(element, draftId)).toEqual({
+    update,
+    usesAccountPreferences: false,
+    creationModes: [mode],
+  });
+  expect(findScopedDraftModelBinding(element, "client-new-thread:b")).toBeNull();
+
+  for (const [index, unowned] of [
+    [16, "existing-thread"],
+    [21, false],
+    [24, vi.fn()],
+    [33, vi.fn()],
+  ] as const) {
+    const original = modelRow[index];
+    modelRow[index] = unowned;
+    expect(findScopedDraftModelBinding(element, draftId)).toBeNull();
+    modelRow[index] = original;
+  }
 });
 it("keeps drafts independent and restores native settings without default persistence", () => {
   const writer = createScopedDraftModelWriter();

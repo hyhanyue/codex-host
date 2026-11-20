@@ -12,7 +12,7 @@ interface ScopedDraftModelBinding {
   creationModes?: readonly Draft[];
 }
 
-/** Desktop 26.1021 and 26.1106 memo tuples bind the client Thread identity, draft setter
+/** Versioned Desktop memo tuples bind the client Thread identity, draft setter
  * and current Model settings mode. Never use the official default Model setter.
  */
 export function findScopedDraftModelBinding(
@@ -32,6 +32,7 @@ export function findScopedDraftModelBinding(
   }
   const rows: unknown[][] = [];
   const groups = new Map<unknown[], unknown[][]>();
+  const draftRows = new Set<unknown[]>();
   const updates = new Set<UpdateDraft>();
   for (const ancestor of committedReactAncestors(fiber)) {
     const queue = ancestor.updateQueue as { memoCache?: { data?: unknown[] } } | null;
@@ -53,64 +54,87 @@ export function findScopedDraftModelBinding(
         result.updateDraftSettings === row[9] &&
         row[9] === row[12] &&
         typeof row[9] === "function"
-      )
+      ) {
+        draftRows.add(row);
         updates.add(row[9] as UpdateDraft);
+      }
     }
   }
   let update: UpdateDraft | undefined;
   const modes = new Set<boolean>();
   const creationModes = new Set<Draft>();
-  // The reviewed Model hooks pair their current settings mode with this exact
-  // draft setter. A stored draft's mode can belong to an earlier Account.
   for (const row of rows) {
-    // 26.1106 adds the next-turn Model setter and shifts the current setter's
-    // dependencies by one. Keep both reviewed layouts and their identity checks.
-    const shift = row.length === 25 ? 1 : 0;
+    if (row.length !== 24 && row.length !== 25 && row.length !== 37) continue;
+    let setter: UpdateDraft;
+    let accountMode: unknown;
+    let result: Draft | null;
+    const group = groups.get(row);
+    const rowIndex = group?.indexOf(row) ?? -1;
+    const candidate = group?.[rowIndex - 1];
+    if (row.length === 37) {
+      // Desktop 26.1117 separates the public Model hook from its settings context.
+      // Its draft-only setter closes over the same updater as the nested draft hook.
+      const draft = group?.[rowIndex + 1];
+      setter = row[24] as UpdateDraft;
+      accountMode = row[25];
+      result = row[36] as Draft | null;
+      if (
+        row[16] !== null ||
+        row[21] !== true ||
+        !draft ||
+        !draftRows.has(draft) ||
+        draft[9] !== setter ||
+        typeof row[27] !== "function" ||
+        row[27] !== row[33] ||
+        result?.setModelAndReasoningEffort !== row[27] ||
+        result.modelSettings !== row[32]
+      )
+        continue;
+    } else {
+      // Desktop 26.1106 adds a next-turn setter before the draft setter.
+      const shift = row.length === 25 ? 1 : 0;
+      if (row[7] !== null || row[10 + shift] !== true) continue;
+      const context = row[12 + shift] as Draft | null;
+      setter = row[13 + shift] as UpdateDraft;
+      accountMode = context?.usesAccountPreferences;
+      result = row[23 + shift] as Draft | null;
+      if (
+        context !== row[21 + shift] ||
+        typeof row[14 + shift] !== "function" ||
+        row[14 + shift] !== row[20 + shift] ||
+        result?.setModelAndReasoningEffort !== row[14 + shift]
+      )
+        continue;
+    }
     if (
-      (row.length !== 24 && row.length !== 25) ||
-      row[7] !== null ||
-      row[10 + shift] !== true ||
-      !updates.has(row[13 + shift] as UpdateDraft)
+      !updates.has(setter) ||
+      typeof accountMode !== "boolean" ||
+      result?.usesAccountPreferences !== accountMode
     )
       continue;
-    const context = row[12 + shift] as Draft | null;
-    const result = row[23 + shift] as Draft | null;
+
+    // Each native hook can create its own setter for the same draft atom.
+    // Bind through the reviewed draft identity and require a single settings mode.
+    update ??= setter;
+    modes.add(accountMode);
+    // Background creation receives a new client Thread id. Its collaboration mode
+    // retains the originating draft's Model settings.
+    const settings = result.modelSettings as Draft | null;
+    const modeShift = candidate?.length === 55 ? 3 : 0;
+    const mode = candidate?.[44 + modeShift] as Draft | null;
+    const value = candidate?.[51 + modeShift] as Draft | null;
     if (
-      context &&
-      context === row[21 + shift] &&
-      typeof context.usesAccountPreferences === "boolean" &&
-      result?.usesAccountPreferences === context.usesAccountPreferences &&
-      typeof row[14 + shift] === "function" &&
-      row[14 + shift] === row[20 + shift] &&
-      result.setModelAndReasoningEffort === row[14 + shift]
-    ) {
-      // Each native hook can create its own setter for the same draft atom.
-      // Bind through its reviewed draft identity and Model context, not through
-      // function identity shared by every hook in the Composer.
-      update ??= row[13 + shift] as UpdateDraft;
-      modes.add(context.usesAccountPreferences);
-      // Background creation receives a new client Thread id. The reviewed
-      // collaboration-mode memo retains the originating draft's Model hook.
-      const settings = result.modelSettings as Draft | null;
-      const group = groups.get(row);
-      const candidate = group?.[group.indexOf(row) - 1];
-      // 26.1106 adds effect-event memo slots before the active mode.
-      const modeShift = candidate?.length === 55 ? 3 : 0;
-      const mode = candidate?.[44 + modeShift] as Draft | null;
-      const value = candidate?.[51 + modeShift] as Draft | null;
-      if (
-        (candidate?.length === 52 || candidate?.length === 55) &&
-        settings &&
-        candidate[39 + modeShift] === settings.model &&
-        candidate[40 + modeShift] === settings.reasoningEffort &&
-        mode &&
-        mode === candidate[49 + modeShift] &&
-        mode.settings === candidate[41 + modeShift] &&
-        (mode.settings as Draft | null)?.model === settings.model &&
-        value?.activeMode === mode
-      )
-        creationModes.add(mode);
-    }
+      (candidate?.length === 52 || candidate?.length === 55) &&
+      settings &&
+      candidate[39 + modeShift] === settings.model &&
+      candidate[40 + modeShift] === settings.reasoningEffort &&
+      mode &&
+      mode === candidate[49 + modeShift] &&
+      mode.settings === candidate[41 + modeShift] &&
+      (mode.settings as Draft | null)?.model === settings.model &&
+      value?.activeMode === mode
+    )
+      creationModes.add(mode);
   }
   const [usesAccountPreferences] = modes;
   return update && modes.size === 1 && usesAccountPreferences !== undefined
